@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recipe Box &amp; Meal Planner</title>
+  <meta name="description" content="Import recipes from links, scans and PDFs, plan dinners and build a shopping list.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍲</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="logo" aria-hidden="true">🍲</span> Recipe Box</div>
+    <nav class="tabs" aria-label="Main">
+      <button data-view="library">Recipes</button>
+      <button data-view="add">Add</button>
+      <button data-view="plan">Meal plan</button>
+      <button data-view="shop">Shopping list</button>
+      <button data-view="settings" aria-label="Settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- LIBRARY -->
+    <section id="view-library" class="view" hidden>
+      <div class="view-head">
+        <h1>Recipes <span class="count" id="lib-count"></span></h1>
+        <button class="btn primary" data-go="add">+ Add recipes</button>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="lib-search" placeholder="Search titles or ingredients…" aria-label="Search recipes">
+        <select id="lib-meal" aria-label="Meal type"></select>
+        <select id="lib-protein" aria-label="Protein"></select>
+      </div>
+      <div id="lib-grid" class="grid"></div>
+    </section>
+
+    <!-- ADD -->
+    <section id="view-add" class="view" hidden>
+      <div id="add-sources">
+        <div class="view-head"><h1>Add recipes</h1></div>
+        <div class="source-grid">
+          <div class="card source">
+            <h2>🔗 From a link</h2>
+            <p class="muted">Paste a recipe page address. Most recipe sites publish structured recipe data, so this is usually exact.</p>
+            <form id="url-form" class="row">
+              <input type="url" id="url-input" placeholder="https://www.example.com/best-lasagna" required>
+              <button class="btn primary">Import</button>
+            </form>
+            <details class="bookmarklet">
+              <summary>Site won't import? Use the one-click bookmark</summary>
+              <p class="muted">Drag this button to your bookmarks bar. When you're on any recipe page, click it and the recipe opens here, ready to save. It works on sites that block imports.</p>
+              <a class="btn" id="bookmarklet" href="#">📌 Save to Recipe Box</a>
+            </details>
+          </div>
+          <div class="card source">
+            <h2>📷 Scan or upload</h2>
+            <p class="muted">Photos (JPEG/PNG) or PDFs. Text is read on this device with OCR — you'll review it before saving. Select several files to import a batch.</p>
+            <label class="dropzone" id="dropzone">
+              <input type="file" id="file-input" accept="image/*,application/pdf,.txt,.html" multiple hidden>
+              <span><strong>Choose files</strong> or drop them here</span>
+            </label>
+          </div>
+          <div class="card source">
+            <h2>📋 Paste text</h2>
+            <p class="muted">Copy a recipe from anywhere (email, notes, a site that blocks import) and paste it here.</p>
+            <textarea id="paste-input" rows="5" placeholder="Title&#10;Ingredients&#10;1 cup rice&#10;…&#10;Instructions&#10;…"></textarea>
+            <div class="row end"><button class="btn" id="paste-btn">Read recipe</button> <button class="btn ghost" id="blank-btn">Type from scratch</button></div>
+          </div>
+        </div>
+        <div id="import-status" class="status" hidden></div>
+      </div>
+      <div id="review" hidden></div>
+    </section>
+
+    <!-- PLAN -->
+    <section id="view-plan" class="view" hidden>
+      <div class="view-head"><h1>Meal plan</h1></div>
+      <div class="plan-layout">
+        <aside class="card filters" id="plan-filters"></aside>
+        <div>
+          <div id="plan-warnings"></div>
+          <div id="plan-days" class="plan-days"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SHOPPING -->
+    <section id="view-shop" class="view" hidden>
+      <div class="view-head">
+        <h1>Shopping list</h1>
+        <div class="row wrap">
+          <button class="btn" id="shop-print">🖨 Print</button>
+          <button class="btn" id="shop-copy">Copy</button>
+          <button class="btn" id="shop-share" hidden>Share</button>
+          <button class="btn" id="shop-txt">Download .txt</button>
+          <button class="btn" id="shop-csv">Download .csv</button>
+        </div>
+      </div>
+      <p class="muted" id="shop-sub"></p>
+      <form id="shop-add" class="row">
+        <input id="shop-add-input" placeholder="Add an item (e.g. paper towels, milk)…" aria-label="Add item">
+        <button class="btn">Add</button>
+      </form>
+      <div id="shop-list"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="view-settings" class="view" hidden>
+      <div class="view-head"><h1>Settings</h1></div>
+      <div class="settings-grid">
+        <div class="card">
+          <h2>Always in my pantry</h2>
+          <p class="muted">Items here are automatically ticked "have it" on every shopping list. One per line.</p>
+          <textarea id="pantry-input" rows="8"></textarea>
+          <div class="row end"><button class="btn primary" id="pantry-save">Save pantry</button></div>
+        </div>
+        <div class="card">
+          <h2>Backup &amp; restore</h2>
+          <p class="muted">Download your whole library as a file, or load one back (merges with what's here).</p>
+          <div class="row wrap">
+            <button class="btn" id="backup-btn">Download backup</button>
+            <label class="btn">Restore from file<input type="file" id="restore-input" accept=".json,application/json" hidden></label>
+          </div>
+          <h2 class="mt">Dish photos</h2>
+          <p class="muted">Look up photos (Wikipedia, Wikimedia Commons, TheMealDB) for recipes that don't have one.</p>
+          <button class="btn" id="photos-btn">Find missing photos</button>
+          <h2 class="mt">Sample recipes</h2>
+          <p class="muted">Add 15 sample recipes to try the planner.</p>
+          <button class="btn" id="samples-btn">Load sample recipes</button>
+          <h2 class="mt">Danger zone</h2>
+          <button class="btn danger" id="wipe-btn">Delete all recipes</button>
+        </div>
+        <div class="card" id="cloud-card">
+          <h2>Cloud sync</h2>
+          <div id="cloud-body"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="recipe-dialog"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="print-root"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
