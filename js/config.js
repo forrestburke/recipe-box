@@ -4,14 +4,15 @@ export const config = {
   // Local dev: served by server.js. Firebase: rewritten to the fetchRecipe Cloud Function (see firebase.json).
   fetchProxy: '/api/fetch',
 
-  // Paste your Firebase web app config here to enable Google sign-in and cloud sync across devices.
-  // Firebase console -> Project settings -> Your apps -> Web app -> SDK setup and configuration.
-  // Leave as null to keep everything in this browser only (localStorage).
-  firebase: null,
-  // firebase: {
-  //   apiKey: '...',
-  //   authDomain: 'your-project.firebaseapp.com',
-  //   projectId: 'your-project',
-  //   appId: '...',
-  // },
+  // Firebase web app config: enables Google sign-in and cloud sync across devices.
+  // These values are public identifiers, not secrets; access is enforced by firestore.rules.
+  // Set to null to keep everything in this browser only (localStorage).
+  firebase: {
+    apiKey: 'AIzaSyA3xzn0O1cAzPw6VxGROzvWbZmZqzL_v90',
+    authDomain: 'recipe-box-66ae1.firebaseapp.com',
+    projectId: 'recipe-box-66ae1',
+    storageBucket: 'recipe-box-66ae1.firebasestorage.app',
+    messagingSenderId: '811729264103',
+    appId: '1:811729264103:web:272197a189699952b0b142',
+  },
 };
