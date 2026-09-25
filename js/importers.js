@@ -47,7 +47,8 @@ export async function importFromUrl(url) {
   } catch {
     throw new Error('Could not reach the page-fetch service. If this is hosted without the Cloud Function, paste the recipe text instead.');
   }
-  const body = await res.json().catch(() => ({}));
+  const body = await res.json().catch(() => null);
+  if (!body) throw new Error('Link import isn\'t switched on for this site. Use the 📌 "Save to Recipe Box" bookmark button below (it works on any recipe page), or paste the recipe text.');
   if (!res.ok) throw new Error(body.error || `Fetch failed (${res.status})`);
   const draft = extractRecipeFromHtml(body.html, body.finalUrl || url);
   draft.source = { type: 'url', url: body.finalUrl || url };

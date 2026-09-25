@@ -81,6 +81,8 @@ firestore.rules       Each user can only access their own data
    ```
 6. In **Authentication → Settings → Authorized domains**, make sure your `*.web.app` domain is listed. It's added automatically in most cases.
 
+> **Sharing:** sign in, then Settings → Cloud sync → enter another Google email → Share. Everyone listed sees and edits the same recipes, meal plan and shopping list, live.
+
 > **Cost note:** Cloud Functions require the pay-as-you-go **Blaze** plan (a card on file). Personal use sits comfortably inside the free monthly allowance (2M function calls), so the expected cost is $0. Set a budget alert in Google Cloud to be safe. If you'd rather not add billing, deploy with `firebase deploy --only hosting,firestore`. Link import will then show an error, but the **bookmark button**, photo/PDF and paste imports all still work, because they don't need the server.
 
 ### Auto-deploy from GitHub

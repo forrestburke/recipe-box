@@ -875,11 +875,20 @@ function initShop() {
 function renderSettings() {
   $('#pantry-input').value = store.settings().pantry.join('\n');
   const c = store.cloudStatus();
-  $('#cloud-body').innerHTML = !c
-    ? `<p class="muted">Recipes are saved in this browser only. To sync between your phone and computer, add your Firebase config to <code>js/config.js</code> (see README).</p>`
+  $('#cloud-body').innerHTML = (!c
+    ? `<p class="muted">Recipes are saved in this browser only. To sync between devices, add your Firebase config to <code>js/config.js</code> (see README).</p>`
     : c.signedIn
-      ? `<p>Signed in as <strong>${esc(c.name)}</strong>. Recipes sync automatically.</p><button class="btn" id="signout-btn">Sign out</button>`
-      : `<p class="muted">Sign in to sync your recipes across devices.</p><button class="btn primary" id="signin-btn">Sign in with Google</button>`;
+      ? `<p>Signed in as <strong>${esc(c.name)}</strong> (${esc(c.email)}). Recipes, the meal plan and the shopping list sync live.</p>
+         <h3 class="sub">Shared with</h3>
+         <ul class="members">${c.members.map(m => `<li><span>${esc(m)}${m === c.email ? ' <span class="muted">(you)</span>' : ''}</span>${m === c.email ? '' : `<button class="btn small ghost" data-remove-member="${esc(m)}">Remove</button>`}</li>`).join('')}</ul>
+         <form id="invite-form" class="row" style="margin-top:8px">
+           <input id="invite-email" type="email" placeholder="their Google email" aria-label="Email to share with" required>
+           <button class="btn">Share</button>
+         </form>
+         <p class="muted small">They sign in at <a href="${esc(location.origin)}" target="_blank" rel="noopener">${esc(location.host)}</a> with that Google account and see this same library.</p>
+         <button class="btn" id="signout-btn">Sign out</button>`
+      : `<p class="muted">Sign in with Google to keep your recipes in the cloud and share them with your household.</p><button class="btn primary" id="signin-btn">Sign in with Google</button>`)
+    + (c?.error ? `<p class="status error">${esc(c.error)}</p>` : '');
 }
 
 function initSettings() {
@@ -912,15 +921,29 @@ function initSettings() {
       toast('All recipes deleted');
     }
   });
-  $('#cloud-body').addEventListener('click', e => {
+  $('#cloud-body').addEventListener('click', async e => {
     if (e.target.id === 'signin-btn') store.signIn().catch(err => alert(err.message));
     if (e.target.id === 'signout-btn') store.signOut();
+    const m = e.target.dataset.removeMember;
+    if (m && confirm(`Stop sharing with ${m}?`)) {
+      try { await store.removeMember(m); toast(`Removed ${m}`); } catch (err) { alert(err.message); }
+    }
+  });
+  $('#cloud-body').addEventListener('submit', async e => {
+    if (e.target.id !== 'invite-form') return;
+    e.preventDefault();
+    const email = $('#invite-email').value;
+    try { await store.addMember(email); toast(`Shared with ${email.trim()}`); renderSettings(); }
+    catch (err) { alert(err.message); }
   });
 }
 
 // ---------------- Boot ----------------
 store.init();
-store.onChange(ch => { if (ch.cloud || ch.all) render(); });
+store.onChange(ch => {
+  if (ch.cloud || ch.all) render();
+  if (ch.cloud && !ch.all && view === 'settings') renderSettings();
+});
 setTimeout(() => fillMissingImages(), 1500); // quietly find photos for recipes saved before this feature
 initLibrary(); initAdd(); initPlan(); initShop(); initSettings();
 if (!handleImportHash()) {

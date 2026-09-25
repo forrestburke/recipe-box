@@ -1,9 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Each signed-in user can only read and write their own recipes, plan and settings.
-    match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    function isMember(hid) {
+      return signedIn() && myEmail() in get(/databases/$(database)/documents/households/$(hid)).data.members;
+    }
+
+    // A household is one shared library. Its members are Google account emails.
+    match /households/{hid} {
+      allow read: if signedIn() && myEmail() in resource.data.members;
+      // You can only create your own household, with just yourself in it
+      allow create: if signedIn() && hid == request.auth.uid
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.members == [myEmail()];
+      // Members can invite or remove others, but can't remove themselves or change the owner
+      allow update: if signedIn() && myEmail() in resource.data.members
+        && myEmail() in request.resource.data.members
+        && request.resource.data.owner == resource.data.owner
+        && request.resource.data.members.size() <= 20;
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
+
+      // Recipes, meal plan and shopping list: any member
+      match /{collection}/{document=**} {
+        allow read, write: if isMember(hid);
+      }
     }
   }
 }
