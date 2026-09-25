@@ -892,7 +892,32 @@ function renderSettings() {
     + (c?.error ? `<p class="status error">${esc(c.error)}</p>` : '');
 }
 
+// Header indicator: signed in / signed out / connecting / problem
+function renderAccount() {
+  const chip = $('#account-chip');
+  const c = store.cloudStatus();
+  chip.hidden = !c;
+  if (!c) return;
+  const state = c.error ? 'error' : c.loading ? 'loading' : c.signedIn ? 'on' : 'off';
+  const first = (c.name || c.email || '?').trim().charAt(0).toUpperCase();
+  const avatar = c.signedIn
+    ? `<span class="avatar">${c.photo ? `<img src="${esc(c.photo)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}${esc(first)}</span>`
+    : '';
+  const label = { on: 'Synced', off: 'Sign in', loading: 'Connecting…', error: 'Sync issue' }[state];
+  chip.className = `account-chip ${state}`;
+  chip.title = c.signedIn
+    ? `Signed in as ${c.email}${c.members?.length > 1 ? ` — shared with ${c.members.filter(m => m !== c.email).join(', ')}` : ''}`
+    : state === 'error' ? c.error : 'Not signed in — recipes are only saved in this browser';
+  chip.innerHTML = `<span class="dot" aria-hidden="true"></span>${avatar}<span class="chip-label">${label}</span>`;
+  chip.setAttribute('aria-label', chip.title);
+}
+
 function initSettings() {
+  $('#account-chip').addEventListener('click', () => {
+    const c = store.cloudStatus();
+    if (c && !c.signedIn && !c.loading && !c.error) store.signIn().catch(err => alert(err.message));
+    else show('settings');
+  });
   $('#pantry-save').addEventListener('click', () => {
     store.updateSettings({ pantry: $('#pantry-input').value.split('\n').map(s => s.trim().toLowerCase()).filter(Boolean) });
     toast('Pantry saved');
@@ -942,11 +967,13 @@ function initSettings() {
 // ---------------- Boot ----------------
 store.init();
 store.onChange(ch => {
+  renderAccount();
   if (ch.cloud || ch.all) render();
   if (ch.cloud && !ch.all && view === 'settings') renderSettings();
 });
 setTimeout(() => fillMissingImages(), 1500); // quietly find photos for recipes saved before this feature
 initLibrary(); initAdd(); initPlan(); initShop(); initSettings();
+renderAccount();
 if (!handleImportHash()) {
   const start = location.hash.slice(1);
   show(['library', 'add', 'plan', 'shop', 'settings'].includes(start) ? start : 'library');

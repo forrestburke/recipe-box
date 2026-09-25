@@ -24,6 +24,7 @@ let data = defaults();
 const listeners = new Set();
 let cloud = null; // { uid, email, name, db, fs, hid, members, owner } when signed in
 let cloudError = '';
+let cloudReady = false; // false until Firebase has told us whether someone is signed in
 const notify = (changed) => listeners.forEach(fn => fn(changed));
 
 function load() {
@@ -86,8 +87,8 @@ export const store = {
 
   cloudStatus() {
     if (!config.firebase) return null;
-    if (!cloud) return { signedIn: false, error: cloudError };
-    return { signedIn: true, name: cloud.name, email: cloud.email, members: cloud.members, isOwner: cloud.owner === cloud.uid, error: cloudError };
+    if (!cloud) return { signedIn: false, loading: !cloudReady, error: cloudError };
+    return { signedIn: true, loading: false, name: cloud.name, email: cloud.email, photo: cloud.photo, members: cloud.members, isOwner: cloud.owner === cloud.uid, error: cloudError };
   },
   signIn: () => cloudSignIn(),
   signOut: () => cloudSignOut(),
@@ -110,6 +111,7 @@ async function initCloud() {
     import(FB + 'firebase-app.js'), import(FB + 'firebase-auth.js'), import(FB + 'firebase-firestore.js'),
   ]);
   const app = initializeApp(config.firebase);
+  notify({ cloud: true }); // "connecting…" while Firebase checks the sign-in
   fbMods = { auth, fs };
   fbAuth = auth.getAuth(app);
   const db = fs.getFirestore(app);
@@ -119,11 +121,13 @@ async function initCloud() {
     unsubscribers = [];
     cloud = null;
     cloudError = '';
-    if (!user) return notify({ cloud: true });
+    if (!user) { cloudReady = true; return notify({ cloud: true }); }
+    cloudReady = false;
+    notify({ cloud: true });
     const email = (user.email || '').toLowerCase();
     try {
       const hh = await findOrCreateHousehold(db, fs, user.uid, email);
-      cloud = { uid: user.uid, email, name: user.displayName || user.email, db, fs, hid: hh.id, members: hh.members, owner: hh.owner };
+      cloud = { uid: user.uid, email, name: user.displayName || user.email, photo: user.photoURL || '', db, fs, hid: hh.id, members: hh.members, owner: hh.owner };
       await joinHousehold();
       listenForChanges();
     } catch (e) {
@@ -131,6 +135,7 @@ async function initCloud() {
       cloud = null;
       cloudError = 'Could not connect to your shared library: ' + e.message;
     }
+    cloudReady = true;
     notify({ all: true, cloud: true });
   });
 }

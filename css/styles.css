@@ -45,6 +45,19 @@ a { color: var(--accent); }
 .tabs button:hover { color: var(--text); background: var(--surface-2); }
 .tabs button.active { background: var(--accent); color: var(--accent-ink); }
 
+.account-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; flex: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 12px 4px 10px; font: 500 13px var(--font); cursor: pointer; white-space: nowrap; }
+.account-chip:hover { border-color: var(--muted); }
+.account-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.account-chip.on .dot { background: #2e9d5b; box-shadow: 0 0 0 3px color-mix(in srgb, #2e9d5b 25%, transparent); }
+.account-chip.error .dot { background: var(--warn); }
+.account-chip.loading .dot { background: #d9a53c; animation: pulse 1s ease-in-out infinite alternate; }
+.account-chip.off { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.account-chip.off .dot { background: color-mix(in srgb, var(--accent-ink) 55%, transparent); }
+.account-chip.error { color: var(--warn); border-color: var(--warn-soft); }
+.account-chip .avatar { position: relative; width: 22px; height: 22px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; font-weight: 600; }
+.account-chip .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+@keyframes pulse { from { opacity: .35; } to { opacity: 1; } }
+
 main { max-width: 1180px; margin: 0 auto; padding: 24px 24px 80px; }
 .view-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
 .view-head h1 { margin: 0; }
@@ -211,6 +224,12 @@ dialog::backdrop { background: rgba(30, 20, 10, .45); }
 
 #print-root { display: none; }
 
+@media (max-width: 860px) {
+  .app-header { flex-wrap: wrap; gap: 6px 10px; }
+  .app-header .brand { order: 1; }
+  .app-header .account-chip { order: 2; }
+  .app-header .tabs { order: 3; width: 100%; }
+}
 @media (max-width: 900px) {
   .source-grid, .settings-grid { grid-template-columns: 1fr; }
   .plan-layout { grid-template-columns: 1fr; }
@@ -218,7 +237,7 @@ dialog::backdrop { background: rgba(30, 20, 10, .45); }
   .dlg-cols { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
-  .app-header { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 16px; }
+  .app-header { padding: 10px 16px; }
   main { padding: 16px 16px 60px; }
   h1 { font-size: 1.5rem; }
   .toolbar { grid-template-columns: 1fr 1fr; }
