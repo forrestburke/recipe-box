@@ -1,4 +1,5 @@
 import { store } from './store.js';
+import { config } from './config.js';
 import { categorize, MEAL_TYPES, PROTEIN_LIST } from './categorize.js';
 import { parseIngredients, parseRecipeText, extractRecipeFromHtml, parseIngredientLine, parseQuantity, normalizeUnit, normalizeName, UNIT_NAMES } from './parser.js';
 import { importFromUrl, importFromFile, importFromText } from './importers.js';
@@ -885,7 +886,7 @@ function renderSettings() {
            <input id="invite-email" type="email" placeholder="their Google email" aria-label="Email to share with" required>
            <button class="btn">Share</button>
          </form>
-         <p class="muted small">They sign in at <a href="${esc(location.origin)}" target="_blank" rel="noopener">${esc(location.host)}</a> with that Google account and see this same library.</p>
+         <p class="muted small">They sign in at <a href="${esc(config.appUrl)}" target="_blank" rel="noopener">${esc(config.appUrl.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</a> with that Google account and see this same library.</p>
          <button class="btn" id="signout-btn">Sign out</button>`
       : `<p class="muted">Sign in with Google to keep your recipes in the cloud and share them with your household.</p><button class="btn primary" id="signin-btn">Sign in with Google</button>`)
     + (c?.error ? `<p class="status error">${esc(c.error)}</p>` : '');

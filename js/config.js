@@ -1,5 +1,8 @@
 // App configuration. Edit this file when you deploy.
 export const config = {
+  // The address people use to open the app (shown on the sharing screen)
+  appUrl: 'https://forrestburke.github.io/recipe-box/',
+
   // Endpoint that fetches a recipe web page on the server (browsers can't fetch other sites directly).
   // Local dev: served by server.js. Firebase: rewritten to the fetchRecipe Cloud Function (see firebase.json).
   fetchProxy: '/api/fetch',

@@ -65,7 +65,13 @@ firebase.json         Hosting + rewrite /api/fetch → function
 firestore.rules       Each user can only access their own data
 ```
 
-## Deploy to Firebase (recommended)
+## Live app
+
+**https://forrestburke.github.io/recipe-box/** (GitHub Pages). It updates automatically a minute or so after changes are pushed to `main`. Firebase provides sign-in and the shared Firestore database. `https://recipe-box-66ae1.web.app` (Firebase Hosting) runs the same app and data, but it only updates when you run `firebase deploy --only hosting`.
+
+For sign-in to work, every address the app runs on must be listed in Firebase → Authentication → Settings → Authorized domains (`forrestburke.github.io`, `recipe-box-66ae1.web.app`, `localhost`).
+
+## Deploy to Firebase
 
 1. Create a project at https://console.firebase.google.com.
 2. **Build → Authentication → Get started → Google** (enable it).
