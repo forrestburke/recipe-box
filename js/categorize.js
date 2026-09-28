@@ -40,7 +40,7 @@ const TAG_RULES = {
 
 const MEAL_RULES = {
   breakfast: /\b(breakfast|brunch|pancakes?|waffles?|french toast|oatmeal|porridge|granola|omelett?es?|frittata|scrambled|smoothie|hash browns?|benedict|shakshuka|overnight oats|crepes?|breakfast burrito|egg muffins?)\b/i,
-  dessert: /\b(desserts?|cakes?|cupcakes?|cookies?|brownies?|blondies?|(?<!(pot|shepherd'?s?|cottage|chicken|meat|pork|fish)\s)pies?|puddings?|ice cream|sorbet|cheesecake|mousse|fudge|cobbler|crumble|tiramisu|custard|truffles?|frosting|macarons?|candy|brittle|sundae|panna cotta|trifle|meringue|pavlova|galette|sweet treats?)\b/i,
+  dessert: /\b(desserts?|(?:lemon|dessert|cookie|granola|seven layer|magic|oat|date) bars|(?:lemon|chocolate|rice krispie) squares|cakes?|cupcakes?|cookies?|brownies?|blondies?|(?<!(pot|shepherd'?s?|cottage|chicken|meat|pork|fish)\s)pies?|puddings?|ice cream|sorbet|cheesecake|mousse|fudge|cobbler|crumble|tiramisu|custard|truffles?|frosting|macarons?|candy|brittle|sundae|panna cotta|trifle|meringue|pavlova|galette|sweet treats?)\b/i,
   'baked good': /\b(breads?|loaf|loaves|muffins?|scones?|biscuits?|(?<!(spring|egg|cabbage|summer|lobster|cinnamon)\s)rolls?|bagels?|focaccia|brioche|croissants?|sourdough|cornbread|pretzels?|buns?|baguettes?|flatbreads?|naan|pita|baked goods?|baking|cinnamon rolls?|danish)\b/i,
   side: /\b(side dish|sides?|slaw|coleslaw|mashed potato(es)?|pilaf|roasted (vegetables|veggies|potatoes|carrots|broccoli)|gratin|dinner rolls?)\b/i,
   lunch: /\b(lunch|sandwich(es)?|wraps?|panini|sliders?|lunchbox)\b/i,

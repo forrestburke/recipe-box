@@ -77,8 +77,27 @@
           <div class="card source">
             <h2>📋 Paste text</h2>
             <p class="muted">Copy a recipe from anywhere (email, notes, a site that blocks import) and paste it here.</p>
-            <textarea id="paste-input" rows="5" placeholder="Title&#10;Ingredients&#10;1 cup rice&#10;…&#10;Instructions&#10;…"></textarea>
+            <textarea id="paste-input" rows="5" placeholder="Title&#10;Ingredients&#10;1 cup rice&#10;…&#10;Instructions&#10;…&#10;---&#10;Next recipe…"></textarea>
+            <p class="muted small">Several recipes? Put a line with <code>---</code> between them.</p>
             <div class="row end"><button class="btn" id="paste-btn">Read recipe</button> <button class="btn ghost" id="blank-btn">Type from scratch</button></div>
+          </div>
+        </div>
+        <div class="card bulk-card">
+          <h2>📚 Import a whole binder at once</h2>
+          <div class="bulk-options">
+            <div>
+              <p><strong>Scanned PDF or a batch of photos</strong>: each page becomes a recipe. Pages that continue a recipe are joined automatically, then you check one list and save them all.</p>
+              <label class="btn primary">Choose PDF or photos<input type="file" id="bulk-files" accept="application/pdf,image/*" multiple hidden></label>
+              <p class="muted small">Scanning tips: on iPhone, open <strong>Notes</strong> (or <strong>Files</strong>) → <strong>Scan Documents</strong>, scan every page into one document, then share it as a PDF. A scanner with a sheet feeder also works well. One recipe per page is ideal; flat, well-lit pages read best.</p>
+            </div>
+            <div>
+              <p><strong>Spreadsheet (CSV)</strong>: one row per recipe. Handy if recipes are already typed up somewhere.</p>
+              <div class="row wrap">
+                <label class="btn">Choose CSV file<input type="file" id="csv-file" accept=".csv,text/csv,.tsv,.txt" hidden></label>
+                <button type="button" class="btn ghost" id="csv-template">Download template</button>
+              </div>
+              <p class="muted small">Put ingredients and steps one per line inside their cell (Alt+Enter in Excel), or separate them with <code>|</code>. Leave meal type, protein or tags blank to fill them in automatically.</p>
+            </div>
           </div>
         </div>
         <div id="import-status" class="status" hidden></div>
@@ -102,6 +121,7 @@
         </details>
       </div>
       <div id="review" hidden></div>
+      <div id="bulk" hidden></div>
     </section>
 
     <!-- PLAN -->

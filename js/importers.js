@@ -27,16 +27,33 @@ function loadTesseract() {
   return tesseractPromise;
 }
 
-let worker = null;
+// How many pages to read at once. Phones get fewer (each OCR worker needs memory).
+export function ocrWorkerCount() {
+  const phone = /iPhone|iPad|Android/i.test(navigator.userAgent);
+  return phone ? 2 : Math.min(4, Math.max(1, (navigator.hardwareConcurrency || 2) - 1));
+}
+
+// A pool of OCR workers shared by single and bulk imports
+let schedulerPromise = null;
+function getScheduler(onProgress) {
+  schedulerPromise ??= (async () => {
+    const Tesseract = await loadTesseract();
+    onProgress?.('Loading the text reader (first time only)…');
+    const scheduler = Tesseract.createScheduler();
+    const n = ocrWorkerCount();
+    // first worker before returning so a single import can start; others join in the background
+    scheduler.addWorker(await Tesseract.createWorker('eng', 1));
+    for (let i = 1; i < n; i++) Tesseract.createWorker('eng', 1).then(w => scheduler.addWorker(w)).catch(() => {});
+    return scheduler;
+  })();
+  schedulerPromise.catch(() => { schedulerPromise = null; });
+  return schedulerPromise;
+}
+
 async function ocr(image, onProgress) {
-  const Tesseract = await loadTesseract();
-  if (!worker) {
-    onProgress?.('Loading OCR engine (first time only)…');
-    worker = await Tesseract.createWorker('eng', 1, {
-      logger: m => { if (m.status === 'recognizing text') onProgress?.(`Reading text… ${Math.round(m.progress * 100)}%`); },
-    });
-  }
-  const { data } = await worker.recognize(image);
+  const scheduler = await getScheduler(onProgress);
+  onProgress?.('Reading text…');
+  const { data } = await scheduler.addJob('recognize', image);
   return cleanOcrText(data.text);
 }
 
@@ -55,39 +72,48 @@ export async function importFromUrl(url) {
   return draft;
 }
 
-async function pdfToText(file, onProgress) {
+// ---------- PDFs, page by page ----------
+
+export const isPdf = (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+
+export async function openPdf(file) {
   const pdfjs = await loadPdfJs();
-  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
-  let text = '';
-  for (let p = 1; p <= pdf.numPages; p++) {
-    onProgress?.(`Reading PDF page ${p} of ${pdf.numPages}…`);
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    let lastY = null;
-    for (const item of content.items) {
-      const y = item.transform?.[5];
-      if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 2 && !text.endsWith('\n')) text += '\n';
-      text += item.str;
-      if (item.hasEOL) text += '\n';
-      lastY = y;
-    }
-    text += '\n';
-  }
-  // Scanned PDFs have no text layer: render each page and OCR it
-  if (text.replace(/\s/g, '').length < 40) {
-    text = '';
-    for (let p = 1; p <= pdf.numPages; p++) {
-      onProgress?.(`Scanned PDF — OCR page ${p} of ${pdf.numPages}…`);
-      const page = await pdf.getPage(p);
-      const viewport = page.getViewport({ scale: 2 });
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width; canvas.height = viewport.height;
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport, canvas }).promise;
-      text += (await ocr(canvas, onProgress)) + '\n';
-    }
-  }
-  return text;
+  return pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
 }
+
+async function renderPdfPage(pdf, n, scale) {
+  const page = await pdf.getPage(n);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport, canvas }).promise;
+  return canvas;
+}
+
+export async function pdfPageImage(pdf, n, width = 180) {
+  const page = await pdf.getPage(n);
+  const scale = width / page.getViewport({ scale: 1 }).width;
+  return (await renderPdfPage(pdf, n, scale)).toDataURL('image/jpeg', 0.7);
+}
+
+// Uses the PDF's own text if it has any (typed PDFs, scanner apps with OCR), otherwise OCRs the page image
+export async function pdfPageText(pdf, n, onProgress) {
+  const page = await pdf.getPage(n);
+  const content = await page.getTextContent();
+  let text = '', lastY = null;
+  for (const item of content.items) {
+    const y = item.transform?.[5];
+    if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 2 && !text.endsWith('\n')) text += '\n';
+    text += item.str;
+    if (item.hasEOL) text += '\n';
+    lastY = y;
+  }
+  if (text.replace(/\s/g, '').length >= 40) return text;
+  return ocr(await renderPdfPage(pdf, n, 2), onProgress);
+}
+
+// ---------- Photos ----------
 
 // Downscale huge phone photos and boost contrast a little; helps OCR speed and accuracy
 async function prepareImage(file) {
@@ -103,13 +129,34 @@ async function prepareImage(file) {
   return canvas;
 }
 
+export async function imagePreview(file, width = 180) {
+  const bmp = await createImageBitmap(file);
+  const scale = width / bmp.width;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.7);
+}
+
+export async function imageText(file, onProgress) {
+  onProgress?.('Preparing image…');
+  return ocr(await prepareImage(file), onProgress);
+}
+
+// ---------- Single-file import ----------
+
 export async function importFromFile(file, onProgress) {
   let text;
-  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) text = await pdfToText(file, onProgress);
-  else if (file.type.startsWith('image/')) {
-    onProgress?.('Preparing image…');
-    text = await ocr(await prepareImage(file), onProgress);
-  } else if (file.type.startsWith('text/') || /\.(txt|md)$/i.test(file.name)) text = await file.text();
+  if (isPdf(file)) {
+    const pdf = await openPdf(file);
+    text = '';
+    for (let p = 1; p <= pdf.numPages; p++) {
+      onProgress?.(`Reading PDF page ${p} of ${pdf.numPages}…`);
+      text += (await pdfPageText(pdf, p, onProgress)) + '\n';
+    }
+  } else if (file.type.startsWith('image/')) text = await imageText(file, onProgress);
+  else if (file.type.startsWith('text/') || /\.(txt|md)$/i.test(file.name)) text = await file.text();
   else if (/\.html?$/i.test(file.name)) {
     const draft = extractRecipeFromHtml(await file.text(), '');
     draft.source = { type: 'file', name: file.name };
@@ -121,6 +168,11 @@ export async function importFromFile(file, onProgress) {
   draft.source = { type: 'file', name: file.name };
   if (draft.title === 'Untitled recipe') draft.title = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
   return draft;
+}
+
+// Pasted text; several recipes can be separated by a line of --- (or ===)
+export function splitPastedRecipes(text) {
+  return String(text || '').split(/^\s*(?:-{3,}|={3,})\s*$/m).map(t => t.trim()).filter(t => t.length > 10);
 }
 
 export function importFromText(text) {

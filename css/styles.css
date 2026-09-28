@@ -133,6 +133,29 @@ button.chip.exclude[aria-pressed="true"]::before { content: '✕'; font-size: 10
 .source p { margin-top: 0; font-size: 13.5px; }
 .dropzone { display: grid; place-items: center; min-height: 110px; border: 2px dashed var(--border); border-radius: 12px; cursor: pointer; text-align: center; padding: 12px; color: var(--muted); }
 .dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.bulk-card { margin-top: 14px; }
+.bulk-options { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.bulk-options p { margin: 0 0 10px; font-size: 14px; }
+.bulk-progress .bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 4px 0 6px; }
+.bulk-progress .bar span { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.bulk-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.bulk-item { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; }
+.bulk-item.excluded { opacity: .5; }
+.bulk-item.saved { background: var(--accent-soft); }
+.bulk-inc input { width: 20px; height: 20px; accent-color: var(--accent); }
+.bulk-thumbs { display: flex; gap: 6px; }
+.bulk-thumb { position: relative; width: 48px; height: 62px; border-radius: 6px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; border: 1px solid var(--border); flex: none; }
+.bulk-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bulk-thumb small { position: absolute; bottom: 1px; right: 3px; font-size: 9px; color: #fff; text-shadow: 0 0 3px #000; }
+.bulk-thumb .split { position: absolute; top: 2px; left: 2px; border: 0; border-radius: 50%; width: 20px; height: 20px; font-size: 11px; padding: 0; cursor: pointer; background: rgba(255,255,255,.9); }
+.bulk-thumb.doc { font-size: 22px; }
+.bulk-main { min-width: 0; }
+.bulk-title { font-weight: 600; padding: 6px 9px; }
+.bulk-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.badge.warn, .chip.warn-chip { background: var(--warn-soft); color: var(--warn); border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 500; }
+.bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.scan-view .scan-pages { display: flex; gap: 8px; overflow-x: auto; margin-top: 8px; }
+.scan-view .scan-pages img { max-height: 420px; border-radius: 8px; border: 1px solid var(--border); }
 .iphone-share { margin-top: 14px; }
 .iphone-share summary { cursor: pointer; color: var(--text); font-size: 14.5px; }
 .iphone-share .steps { padding-left: 1.3em; font-size: 14px; }
@@ -276,6 +299,11 @@ dialog::backdrop { background: rgba(30, 20, 10, .45); }
   .slot { grid-template-areas: "label label" "main main" "side side"; }
   .slot-side { justify-content: space-between; margin-top: 4px; }
   .toolbar.with-kitchen { grid-template-columns: 1fr 1fr; }
+  .bulk-options { grid-template-columns: 1fr; }
+  .bulk-item { grid-template-columns: auto minmax(0, 1fr); }
+  .bulk-item .bulk-thumbs { grid-column: 2; grid-row: 1; }
+  .bulk-item .bulk-main { grid-column: 1 / -1; }
+  .bulk-item .bulk-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .item { grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; padding: 10px 12px; }
   .ing-head { display: none; }
   .ing-row { grid-template-columns: 64px minmax(0, 1fr) auto; }

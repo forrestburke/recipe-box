@@ -16,6 +16,16 @@ No AI services, no build step, no framework — plain HTML/CSS/JavaScript that r
 
 Every import lands on a **review screen** where you can fix the title, ingredients, steps and categories before saving.
 
+### Bulk import (a whole binder)
+
+**Add → Import a whole binder at once** takes a multi-page **PDF** or a batch of **photos**, a **CSV**, or several **pasted** recipes separated by a `---` line.
+
+- Each page becomes a recipe. A page with no ingredient list of its own (e.g. the second half of a long recipe) is **joined to the one before**, and blank divider pages are skipped. You can fix either with **⤴ Join with previous** or **✂**.
+- Several pages are read at once (2 on phones, up to 4 on computers). A scanned page takes a few seconds, so a 100-page binder takes several minutes. Keep the tab open.
+- You get **one checklist**: check titles, untick non-recipes, then **Save all**. Anything that looks incomplete (fewer than 3 ingredients, no steps, or no title) is saved with a **⚠ needs review** flag. Filter the library by **Needs review** to tidy those later; saving an edit clears the flag. **Review** opens one recipe with the original scan beside it.
+- **Scanning tips:** on iPhone use Notes or Files → **Scan Documents** and share the result as one PDF. A sheet-feed scanner is fastest for a big binder. One recipe per page is ideal.
+- **CSV:** use **Download template**. Columns: `title, servings, total_time_minutes, meal_type, main_protein, tags, ingredients, steps, notes, source_url, image_url`. Put ingredients and steps one per line inside the cell, or `|`-separated. Comma, semicolon (European Excel) and tab separators all work. Blank categories are auto-detected.
+
 **Categorisation** is rule-based: keyword lists detect the main protein (chicken, beef, pork, fish, shellfish, tofu, legumes, eggs…), meal type (breakfast, dinner, dessert, baked good…), and tags (vegetarian, vegan, contains dairy/gluten/nuts, spicy, cuisine, quick). It ignores false positives such as "chicken broth" or "fish sauce", and you can override anything.
 
 ## Features

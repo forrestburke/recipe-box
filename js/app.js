@@ -2,7 +2,9 @@ import { store } from './store.js';
 import { config } from './config.js';
 import { categorize, MEAL_TYPES, PROTEIN_LIST } from './categorize.js';
 import { parseIngredients, parseRecipeText, extractRecipeFromHtml, parseIngredientLine, parseQuantity, normalizeUnit, normalizeName, UNIT_NAMES } from './parser.js';
-import { importFromUrl, importFromFile, importFromText } from './importers.js';
+import { importFromUrl, importFromFile, importFromText, splitPastedRecipes, isPdf } from './importers.js';
+import { createBulk } from './bulk.js';
+import { recipesFromCsv, csvTemplate } from './csv.js';
 import { dateRange, formatDay, generatePlan, matchesFilters, pickOne, normalizePlan, MEAL_SLOTS } from './planner.js';
 import { buildShoppingList, groupByAisle, listToText, listToCsv } from './shopping.js';
 import { formatQty, unitLabel, scaleIngredientText } from './shopping.js';
@@ -69,6 +71,10 @@ async function fillMissingImages(force = false) {
   return n;
 }
 
+function reviewBadge(r) {
+  return r.needsReview && store.isMine(r) ? '<span class="chip warn-chip" title="Imported from a scan and looks incomplete. Open it and click Edit to check.">⚠ needs review</span>' : '';
+}
+
 function kitchenBadge(r) {
   return store.isMine(r) ? '' : `<span class="chip kitchen" title="Added by ${esc(store.kitchenName(r.kitchen))}">🏠 ${esc(store.kitchenName(r.kitchen))}</span>`;
 }
@@ -102,7 +108,7 @@ document.addEventListener('click', e => {
 
 // ---------------- Library ----------------
 function initLibrary() {
-  $('#lib-meal').innerHTML = '<option value="">All meals</option>' + MEAL_TYPES.map(m => `<option value="${m}">${cap(m)}</option>`).join('');
+  $('#lib-meal').innerHTML = '<option value="">All meals</option>' + MEAL_TYPES.map(m => `<option value="${m}">${cap(m)}</option>`).join('') + '<option value="__review">⚠ Needs review</option>';
   $('#lib-protein').innerHTML = '<option value="">Any protein</option>' + PROTEIN_LIST.map(p => `<option value="${p}">${cap(p)}</option>`).join('') + '<option value="__none">No main protein</option>';
   ['#lib-search', '#lib-meal', '#lib-protein', '#lib-kitchen'].forEach(s => $(s).addEventListener('input', renderLibrary));
   $('#lib-grid').addEventListener('click', e => {
@@ -127,7 +133,8 @@ function renderLibrary() {
   $('#view-library .toolbar').classList.toggle('with-kitchen', !kSel.hidden);
   const list = all.filter(r => {
     if (kVal && (r.kitchen || store.currentKitchen()) !== kVal) return false;
-    if (meal && !r.mealTypes?.includes(meal)) return false;
+    if (meal === '__review') { if (!r.needsReview) return false; }
+    else if (meal && !r.mealTypes?.includes(meal)) return false;
     if (protein === '__none' && r.proteins?.length) return false;
     if (protein && protein !== '__none' && !r.proteins?.includes(protein)) return false;
     if (q && !(r.title.toLowerCase().includes(q) || r.ingredients?.some(i => i.raw.toLowerCase().includes(q)))) return false;
@@ -147,7 +154,7 @@ function renderLibrary() {
       ${thumbHtml(r)}
       <div class="body">
         <h3>${esc(r.title)}</h3>
-        <div class="chips">${kitchenBadge(r)}${chipsHtml(r)}</div>
+        <div class="chips">${reviewBadge(r)}${kitchenBadge(r)}${chipsHtml(r)}</div>
         <div class="meta">${r.ingredients?.length || 0} ingredients${r.totalTime ? ' · ' + r.totalTime + ' min' : ''}${r.servings ? ' · serves ' + r.servings : ''}</div>
       </div>
     </button>`).join('');
@@ -255,9 +262,30 @@ function initAdd() {
     const t = $('#paste-input').value.trim();
     if (!t) return setStatus('Paste some recipe text first.', true);
     $('#paste-input').value = '';
-    startReview([importFromText(t)]);
+    const parts = splitPastedRecipes(t);
+    if (parts.length > 1) { bulk.startDrafts(parts.map(importFromText), `${parts.length} pasted recipes`); showBulk(); }
+    else startReview([importFromText(t)]);
   });
   initIngredientEditor($('#review'));
+
+  // Bulk: a whole binder as one PDF / many photos, or a spreadsheet
+  const bulkInput = $('#bulk-files');
+  bulkInput.addEventListener('change', () => { const f = [...bulkInput.files]; bulkInput.value = ''; if (f.length) { bulk.startFiles(f); showBulk(); } });
+  const csvInput = $('#csv-file');
+  csvInput.addEventListener('change', async () => {
+    const f = csvInput.files[0];
+    csvInput.value = '';
+    if (!f) return;
+    try {
+      const { drafts, skipped, unknownColumns } = recipesFromCsv(await f.text());
+      if (!drafts.length) return setStatus('No recipes found in that file.', true);
+      bulk.startDrafts(drafts, f.name);
+      showBulk();
+      const notes = [skipped && `${skipped} row${skipped === 1 ? '' : 's'} without a title skipped`, unknownColumns.length && `ignored columns: ${unknownColumns.join(', ')}`].filter(Boolean);
+      if (notes.length) toast(notes.join(' · '));
+    } catch (err) { setStatus(err.message, true); }
+  });
+  $('#csv-template').addEventListener('click', () => download('recipe-box-template.csv', csvTemplate(), 'text/csv'));
   $('#blank-btn').addEventListener('click', () => startReview([{ title: '', ingredients: [], steps: [], source: { type: 'manual' }, method: 'manual' }]));
 
   // Bookmarklet and iPhone Shortcut: run on the recipe page in the user's own browser, so sites can't block them.
@@ -303,6 +331,7 @@ function handleImportHash() {
 
 async function handleFiles(files) {
   if (!files.length) return;
+  if (files.length > 1 || files.some(isPdf)) { bulk.startFiles(files); showBulk(); return; }
   const drafts = [];
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
@@ -320,11 +349,35 @@ async function handleFiles(files) {
   if (drafts.length) startReview(drafts);
 }
 
-function startReview(drafts) {
+let reviewDone = null; // set when reviewing a recipe from the bulk list
+
+function startReview(drafts, onDone = null) {
   reviewQueue = drafts;
   reviewIndex = 0;
+  reviewDone = onDone;
+  $('#bulk').hidden = true;
   renderReview();
 }
+
+function showBulk() {
+  $('#add-sources').hidden = true;
+  $('#review').hidden = true;
+  $('#bulk').hidden = false;
+  setStatus('');
+  if (view !== 'add') show('add');
+  window.scrollTo(0, 0);
+}
+
+const bulk = createBulk({
+  root: $('#bulk'),
+  store,
+  toast,
+  onReview: (draft, onSaved) => startReview([draft], onSaved),
+  onFinish: (n) => {
+    $('#add-sources').hidden = false;
+    if (n) { show('library'); fillMissingImages(); }
+  },
+});
 
 // ---------- Ingredient row editor ----------
 // Each row: { raw, qty, qtyMax, unit, name, key, display, note, dirty, keyEdited }
@@ -482,6 +535,7 @@ function toEditorState(d) {
     stepsText: (d.steps || []).join('\n'),
     notes: d.notes || '',
     rawText: d.rawText || '',
+    scanImages: d.scanImages || [],
     source: d.source,
     method: d.method,
     hints: d.hints || [],
@@ -498,7 +552,9 @@ function renderReview() {
   const box = $('#review');
   const sources = $('#add-sources');
   if (reviewIndex >= reviewQueue.length) {
-    box.hidden = true; sources.hidden = false; box.innerHTML = '';
+    box.hidden = true; box.innerHTML = '';
+    if (bulk.isActive()) showBulk(); else sources.hidden = false;
+    reviewDone = null;
     return;
   }
   sources.hidden = true; box.hidden = false;
@@ -557,6 +613,7 @@ function renderReview() {
         </div>
         <label class="field">Steps — one per line<textarea name="stepsText" rows="8">${esc(s.stepsText)}</textarea></label>
         <label class="field">Notes<textarea name="notes" rows="2">${esc(s.notes)}</textarea></label>
+        ${s.scanImages.length ? `<details open class="scan-view"><summary>Original scan</summary><div class="scan-pages">${s.scanImages.map(src => `<img src="${src}" alt="Scanned page">`).join('')}</div></details>` : ''}
         ${s.rawText ? `<details><summary>Scanned text (edit and re-read if the split above looks wrong)</summary>
           <textarea id="raw-text" rows="10" style="margin-top:8px">${esc(s.rawText)}</textarea>
           <div class="row end"><button type="button" class="btn" data-act="reparse">Re-read from this text</button></div></details>` : ''}
@@ -667,6 +724,7 @@ function saveReview(s) {
     ingredients: rowsToIngredients(),
     steps: form.stepsText.value.split('\n').map(l => l.trim()).filter(Boolean),
     notes: form.notes.value.trim(),
+    rawText: s.rawText || undefined, // kept so a scan can be re-read later
     source: s.source || { type: 'manual' },
   };
   if (!recipe.mealTypes.length) recipe.mealTypes = ['dinner'];
@@ -674,6 +732,7 @@ function saveReview(s) {
   toast(`Saved "${title}"`);
   if (!saved.image && !saved.imageTried) autoImage(saved.id); // look up a dish photo in the background
   reviewIndex++;
+  if (reviewDone) { const cb = reviewDone; cb(saved); if (reviewIndex >= reviewQueue.length) return renderReview(); }
   if (reviewIndex >= reviewQueue.length) {
     renderReview();
     show('library');

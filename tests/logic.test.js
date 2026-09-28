@@ -98,3 +98,39 @@ test('kitchen filter', () => {
   assert.ok(!matchesFilters(r, { kitchens: ['k2'] }));
   assert.ok(matchesFilters({ title: 'y' }, { kitchens: ['local'] }));
 });
+
+import { parseCsv, recipesFromCsv, csvTemplate } from '../js/csv.js';
+import { splitPastedRecipes } from '../js/importers.js';
+
+test('CSV import: template round-trip, semicolons, multi-line cells', () => {
+  const { drafts, skipped } = recipesFromCsv(csvTemplate());
+  assert.equal(drafts.length, 2); assert.equal(skipped, 0);
+  assert.equal(drafts[0].title, "Grandma's Meatloaf");
+  assert.equal(drafts[0].ingredients.length, 5);
+  assert.equal(drafts[0].steps.length, 3);
+  assert.deepEqual(drafts[0].mealTypes, ['dinner']);
+  assert.equal(drafts[1].ingredients.length, 5, 'pipe-separated');
+  assert.equal(drafts[1].proteins, undefined, 'blank protein left for auto-detect');
+  const semi = 'Title;Ingredients;Instructions\r\n"Soup";"1 onion\n2 carrots";"Chop; simmer"\r\n;;\r\n';
+  const r = recipesFromCsv(semi);
+  assert.equal(r.drafts.length, 1);
+  assert.deepEqual(r.drafts[0].ingredients, ['1 onion', '2 carrots']);
+  assert.deepEqual(parseCsv('a,"b ""q"" c",d'), [['a', 'b "q" c', 'd']]);
+  assert.throws(() => recipesFromCsv('name,foo\nx,y'), /ingredients/);
+});
+
+import { looksLikeContinuation, isBlankPage, isWeak } from '../js/bulk.js';
+
+test('bulk: page joining, blank pages, weak recipes, pasted batches', () => {
+  assert.ok(looksLikeContinuation('2. Add onions and cook.\n3. Simmer for two hours.'));
+  assert.ok(!looksLikeContinuation('Beef Stew\nIngredients\n2 lb beef\n1 onion\nDirections\nCook it.'));
+  assert.ok(!looksLikeContinuation('Pancakes\n2 cups flour\n2 eggs\n1 cup milk\nMix and fry.'));
+  assert.ok(isBlankPage('  \n . '));
+  assert.ok(!isBlankPage('Lemon Bars\n1 cup butter'));
+  assert.ok(isWeak({ ingredients: ['a', 'b'], steps: ['x'] }, 'Soup'));
+  assert.ok(isWeak({ ingredients: ['a', 'b', 'c'], steps: [] }, 'Soup'));
+  assert.ok(isWeak({ ingredients: ['a', 'b', 'c'], steps: ['x'] }, ''));
+  assert.ok(!isWeak({ ingredients: ['a', 'b', 'c'], steps: ['x'] }, 'Soup'));
+  assert.equal(splitPastedRecipes('Soup\n1 cup water\n---\nBread\n2 cups flour\n===\nTea\n1 tea bag and water').length, 3);
+  assert.equal(splitPastedRecipes('Just one recipe\n1 cup rice').length, 1);
+});
