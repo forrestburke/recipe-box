@@ -12,7 +12,8 @@
       "tests/**",
       "server.js",
       "package.json",
-      "README.md"
+      "README.md",
+      "**/*.log"
     ]
   },
   "functions": [
@@ -24,5 +25,17 @@
   ],
   "firestore": {
     "rules": "firestore.rules"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
   }
 }

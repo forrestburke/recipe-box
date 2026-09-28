@@ -95,6 +95,7 @@ button.chip.exclude[aria-pressed="true"] { background: var(--warn); color: #fff;
 button.chip.exclude[aria-pressed="true"]::before { content: '✕'; font-size: 10px; }
 .chip.meal { background: var(--accent-soft); color: var(--accent); }
 .chip.protein { background: #f6e3c8; color: #7a4a12; }
+@media (prefers-color-scheme: dark) { .chip.kitchen { background: #2f2a4a; color: #c9c0f5; } }
 @media (prefers-color-scheme: dark) { .chip.protein { background: #463521; color: #f0c98f; } }
 .chip.tag { background: var(--surface-2); color: var(--muted); }
 
@@ -132,6 +133,12 @@ button.chip.exclude[aria-pressed="true"]::before { content: '✕'; font-size: 10
 .source p { margin-top: 0; font-size: 13.5px; }
 .dropzone { display: grid; place-items: center; min-height: 110px; border: 2px dashed var(--border); border-radius: 12px; cursor: pointer; text-align: center; padding: 12px; color: var(--muted); }
 .dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.iphone-share { margin-top: 14px; }
+.iphone-share summary { cursor: pointer; color: var(--text); font-size: 14.5px; }
+.iphone-share .steps { padding-left: 1.3em; font-size: 14px; }
+.iphone-share .steps li { margin-bottom: 10px; }
+.code-wrap { margin-top: 8px; }
+.code-wrap pre { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow: auto; margin: 0 0 6px; }
 .bookmarklet { margin-top: 12px; }
 .bookmarklet p { margin: 8px 0; }
 .bookmarklet .btn { cursor: grab; }
@@ -169,8 +176,28 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .filters .check { display: flex; gap: 8px; align-items: center; font-size: 13.5px; margin-top: 10px; }
 .filters .check input { width: auto; }
 .plan-days { display: flex; flex-direction: column; gap: 8px; }
-.day { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 14px; }
+.day { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 14px; align-items: start; padding: 12px 14px; }
+.day .date { padding-top: 4px; }
+.slots { display: flex; flex-direction: column; }
+.slot { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label label" "main side"; gap: 2px 12px; align-items: center; padding: 8px 0; border-top: 1px dashed var(--border); }
+.slot:first-child { border-top: 0; padding-top: 0; }
+.slot:last-child { padding-bottom: 0; }
+.slot-label { grid-area: label; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.slot-main { grid-area: main; min-width: 0; }
+.slot-side { grid-area: side; display: flex; align-items: center; gap: 8px; }
+.slot.skip .slot-main { opacity: .6; }
+.slot.locked .slot-label::after { content: ' · locked'; color: var(--accent); }
+.stepper { display: inline-flex; align-items: center; gap: 8px; }
+.stepper .btn { padding: 2px 9px; }
+.stepper.small { gap: 4px; font-size: 13px; }
+.stepper.small small { color: var(--muted); font-size: 11px; }
+.chip.kitchen { background: #e6e3f5; color: #4a3f8a; }
+.kitchen-switch { width: auto; max-width: 220px; margin-left: auto; padding: 5px 10px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+.kitchen-switch:not([hidden]) + .account-chip { margin-left: 0; }
+.dlg-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 10px 0 4px; }
+.toolbar.with-kitchen { grid-template-columns: 1fr 160px 160px 160px; }
 .day > div { min-width: 0; }
+.day .day-meal { min-width: 0; }
 .day .date { font-weight: 600; font-size: 14px; }
 .day .date small { display: block; color: var(--muted); font-weight: 400; }
 .day .title { font-family: var(--display); font-size: 1.05rem; font-weight: 600; cursor: pointer; background: none; border: 0; padding: 0; color: inherit; text-align: left; }
@@ -227,6 +254,7 @@ dialog::backdrop { background: rgba(30, 20, 10, .45); }
 @media (max-width: 860px) {
   .app-header { flex-wrap: wrap; gap: 6px 10px; }
   .app-header .brand { order: 1; }
+  .app-header .kitchen-switch { order: 2; max-width: 150px; }
   .app-header .account-chip { order: 2; }
   .app-header .tabs { order: 3; width: 100%; }
 }
@@ -242,9 +270,12 @@ dialog::backdrop { background: rgba(30, 20, 10, .45); }
   h1 { font-size: 1.5rem; }
   .toolbar { grid-template-columns: 1fr 1fr; }
   .toolbar input { grid-column: 1 / -1; }
-  .day { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; }
-  .day .date { grid-column: 1 / -1; }
-  .day .actions { flex-direction: column; }
+  .day { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .day .date { padding-top: 0; }
+  .day .date small { display: inline; margin-left: 6px; }
+  .slot { grid-template-areas: "label label" "main main" "side side"; }
+  .slot-side { justify-content: space-between; margin-top: 4px; }
+  .toolbar.with-kitchen { grid-template-columns: 1fr 1fr; }
   .item { grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; padding: 10px 12px; }
   .ing-head { display: none; }
   .ing-row { grid-template-columns: 64px minmax(0, 1fr) auto; }

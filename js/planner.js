@@ -1,4 +1,10 @@
-// Meal plan generation: random dinners for a date range, honouring filters.
+// Meal plan generation: random meals (breakfast / lunch / dinner) for a date range, honouring filters.
+//
+// Plan shape:
+//   { start, end, meals: ['dinner'], people: 4,
+//     days: [{ date, slots: { dinner: { recipeId, locked, skip, servings } } }] }
+
+export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'];
 
 export function dateRange(start, end) {
   const out = [];
@@ -17,14 +23,26 @@ export function formatDay(iso) {
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
+// Older plans stored one dinner per day as { date, recipeId, locked, skip }
+export function normalizePlan(plan) {
+  if (!plan) return plan;
+  const days = (plan.days || []).map(d => {
+    if (d.slots) return d;
+    const { date, recipeId, locked, skip } = d;
+    return { date, slots: recipeId || skip ? { dinner: { recipeId: recipeId || null, locked: !!locked, skip: !!skip } } : {} };
+  });
+  return { meals: ['dinner'], ...plan, days };
+}
+
 function splitTerms(s) {
   return String(s || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
 }
 
-// filters: { mealTypes: [], excludeProteins: [], excludeTags: [], requireTags: [], excludeIngredients: 'mushroom, cilantro' }
+// filters: { mealTypes, excludeProteins, excludeTags, requireTags, excludeIngredients: 'mushroom, cilantro', kitchens: [ids] }
 export function matchesFilters(recipe, filters) {
   const f = filters || {};
   if (f.mealTypes?.length && !recipe.mealTypes?.some(m => f.mealTypes.includes(m))) return false;
+  if (f.kitchens?.length && !f.kitchens.includes(recipe.kitchen || 'local')) return false;
   if (f.excludeProteins?.length && recipe.proteins?.some(p => f.excludeProteins.includes(p))) return false;
   if (f.excludeTags?.length && recipe.tags?.some(t => f.excludeTags.includes(t))) return false;
   if (f.requireTags?.length && !f.requireTags.every(t => recipe.tags?.includes(t))) return false;
@@ -45,45 +63,59 @@ function shuffle(arr) {
   return a;
 }
 
-// existingDays: previous plan days, locked ones are kept. Returns { days, warnings }.
+// Fills every unlocked, un-skipped slot for the chosen meals. Returns { days, warnings }.
+// opts: { meals: ['dinner'], avoidBackToBack, servings }
 export function generatePlan(recipes, filters, dates, existingDays = [], opts = {}) {
-  const pool = recipes.filter(r => matchesFilters(r, filters));
+  const meals = opts.meals?.length ? opts.meals : ['dinner'];
   const warnings = [];
   const prev = new Map(existingDays.map(d => [d.date, d]));
   const days = dates.map(date => {
-    const p = prev.get(date);
-    return p && (p.locked || p.skip) ? { ...p } : { date, recipeId: null, locked: false, skip: false };
-  });
-
-  if (!pool.length) {
-    warnings.push('No recipes match these filters. Loosen the filters or add more recipes.');
-    return { days, warnings };
-  }
-
-  const used = new Set(days.filter(d => d.recipeId).map(d => d.recipeId));
-  let queue = shuffle(pool.filter(r => !used.has(r.id)));
-  let repeated = false;
-  const byId = new Map(recipes.map(r => [r.id, r]));
-
-  for (let i = 0; i < days.length; i++) {
-    const day = days[i];
-    if (day.locked || day.skip) continue;
-    if (!queue.length) { queue = shuffle(pool); repeated = true; }
-    const prevProteins = byId.get(days[i - 1]?.recipeId)?.proteins || [];
-    let idx = 0;
-    if (opts.avoidBackToBack && prevProteins.length) {
-      const alt = queue.findIndex(r => !r.proteins?.some(p => prevProteins.includes(p)));
-      if (alt !== -1) idx = alt;
+    const slots = {};
+    for (const [meal, s] of Object.entries(prev.get(date)?.slots || {})) {
+      // keep locked/skipped slots, and slots for meals we're not re-planning
+      if (s.locked || s.skip || !meals.includes(meal)) slots[meal] = { ...s };
     }
-    day.recipeId = queue.splice(idx, 1)[0].id;
+    return { date, slots };
+  });
+  const byId = new Map(recipes.map(r => [r.id, r]));
+  const used = new Set(days.flatMap(d => Object.values(d.slots).map(s => s.recipeId)).filter(Boolean));
+
+  for (const meal of meals) {
+    const pool = recipes.filter(r => matchesFilters(r, { ...filters, mealTypes: [meal] }));
+    if (!pool.length) {
+      warnings.push(`No ${meal} recipes match these filters${meal !== 'dinner' ? ` — tag some recipes as "${meal}"` : ''}.`);
+      continue;
+    }
+    let queue = shuffle(pool.filter(r => !used.has(r.id)));
+    let repeated = false;
+    for (let i = 0; i < days.length; i++) {
+      const cur = days[i].slots[meal];
+      if (cur?.locked || cur?.skip) continue;
+      if (!queue.length) { queue = shuffle(pool); repeated = true; }
+      const prevProteins = byId.get(days[i - 1]?.slots[meal]?.recipeId)?.proteins || [];
+      let idx = 0;
+      if (opts.avoidBackToBack && meal !== 'breakfast' && prevProteins.length) {
+        const alt = queue.findIndex(r => !r.proteins?.some(p => prevProteins.includes(p)));
+        if (alt !== -1) idx = alt;
+      }
+      const pick = queue.splice(idx, 1)[0];
+      used.add(pick.id);
+      days[i].slots[meal] = { recipeId: pick.id, locked: false, skip: false, servings: cur?.servings ?? opts.servings ?? null };
+    }
+    if (repeated) warnings.push(`Only ${pool.length} ${meal} recipe${pool.length === 1 ? '' : 's'} match your filters, so some repeat.`);
   }
-  if (repeated) warnings.push(`Only ${pool.length} recipe${pool.length === 1 ? '' : 's'} match your filters, so some meals repeat.`);
   return { days, warnings };
 }
 
-export function pickOne(recipes, filters, excludeIds = []) {
-  const pool = recipes.filter(r => matchesFilters(r, filters));
+export function pickOne(recipes, filters, excludeIds = [], meal = 'dinner') {
+  const pool = recipes.filter(r => matchesFilters(r, { ...filters, mealTypes: [meal] }));
   const fresh = pool.filter(r => !excludeIds.includes(r.id));
   const from = fresh.length ? fresh : pool;
   return from.length ? from[Math.floor(Math.random() * from.length)] : null;
+}
+
+// How much to multiply a recipe's ingredients by for a planned slot
+export function scaleFactor(recipe, servings) {
+  if (!recipe?.servings || !servings) return 1;
+  return servings / recipe.servings;
 }

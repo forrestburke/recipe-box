@@ -28,6 +28,23 @@ Every import lands on a **review screen** where you can fix the title, ingredien
 - **Backup**: export or import your whole library as JSON
 - **Optional cloud sync**: Firebase Auth (Google sign-in) plus Firestore, so your phone and computer share one library
 
+## Kitchens & family sharing
+
+- A **kitchen** has its own meal plan, shopping list and pantry. Everyone in a kitchen (e.g. you and your partner) shares all of it live. Add people under **Settings → Your kitchen**.
+- A **family** is a group of kitchens that pool their **recipes**. Invite someone under **Settings → Family recipe sharing**. They get their own kitchen (their own plan and list) and see everyone's recipes.
+- Recipes can only be edited or deleted by the kitchen that added them. Others can plan with them or use **Copy to my kitchen**.
+- The library and the planner have a **Recipes from** filter (ours / theirs / all).
+- If you belong to more than one kitchen, a switcher appears in the header.
+- Security is enforced in `firestore.rules`. Test it locally with the emulator: `firebase emulators:start --only auth,firestore`, then open http://localhost:5173/?emulator (needs Java 11+).
+
+## Meals & servings
+
+Plan any mix of **breakfast, lunch and dinner**. Set **Cooking for N people**, adjust servings per meal, and the shopping list scales. Recipe pages have a servings adjuster too, which needs a "Serves" number on the recipe.
+
+## iPhone
+
+**Add → iPhone: save recipes from Safari** walks through a one-time Shortcut (Run JavaScript on Web Page, then Open URLs). After that, **Share → Save to Recipe Box** on any recipe page imports it with no server. **Share → Add to Home Screen** installs the app icon.
+
 ## Run locally
 
 Requires Node.js 18+ (no `npm install` needed for local dev).

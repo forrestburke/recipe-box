@@ -56,19 +56,35 @@ export function isPantryItem(key, pantry) {
   });
 }
 
-// plan: { days: [{date, recipeId, skip}] }, state: { overrides: {key: bool}, custom: [{id, name, have}] }
+// One ingredient line at a different serving size, e.g. "1½ cups flour" x2 -> "3 cups flour"
+export function scaleIngredientText(ing, factor) {
+  if (factor === 1 || ing.qty == null) return ing.raw;
+  const q = ing.qty * factor;
+  const max = ing.qtyMax != null ? ing.qtyMax * factor : null;
+  return [formatQty(q) + (max != null ? '–' + formatQty(max) : ''), ing.note && `(${ing.note})`, unitLabel(ing.unit, max ?? q), ing.name]
+    .filter(Boolean).join(' ');
+}
+
+// plan: { meals, days: [{ date, slots: { dinner: { recipeId, skip, servings } } }] }
+// state: { overrides: {key: bool}, custom: [{id, name, have}] }
 export function buildShoppingList(plan, recipesById, pantry = [], state = {}) {
   const items = new Map();
+  const meals = plan?.meals?.length ? plan.meals : ['dinner'];
   for (const day of plan?.days || []) {
-    if (day.skip || !day.recipeId) continue;
-    const r = recipesById.get(day.recipeId);
-    if (!r) continue;
-    for (const ing of r.ingredients || []) {
-      if (!ing.key) continue;
-      let it = items.get(ing.key);
-      if (!it) items.set(ing.key, (it = { key: ing.key, name: titleCase(ing.display || ing.key), entries: [], recipes: new Set(), aisle: aisleFor(ing.key) }));
-      it.entries.push(ing);
-      it.recipes.add(r.title);
+    for (const meal of meals) {
+      const slot = day.slots?.[meal];
+      if (!slot || slot.skip || !slot.recipeId) continue;
+      const r = recipesById.get(slot.recipeId);
+      if (!r) continue;
+      const servings = slot.servings || plan.people;
+      const factor = r.servings && servings ? servings / r.servings : 1;
+      for (const ing of r.ingredients || []) {
+        if (!ing.key) continue;
+        let it = items.get(ing.key);
+        if (!it) items.set(ing.key, (it = { key: ing.key, name: titleCase(ing.display || ing.key), entries: [], recipes: new Set(), aisle: aisleFor(ing.key) }));
+        it.entries.push(factor === 1 ? ing : { ...ing, qty: ing.qty != null ? ing.qty * factor : null, qtyMax: ing.qtyMax != null ? ing.qtyMax * factor : null });
+        it.recipes.add(r.title);
+      }
     }
   }
 
@@ -81,7 +97,7 @@ export function buildShoppingList(plan, recipesById, pantry = [], state = {}) {
       aisle: it.aisle,
       amount: combineAmounts(it.entries),
       recipes: [...it.recipes],
-      raw: it.entries.map(e => e.raw),
+      raw: [...new Set(it.entries.map(e => e.raw))],
       have: overrides[it.key] ?? auto,
       pantry: auto,
     };

@@ -8,14 +8,23 @@ service cloud.firestore {
     function myEmail() {
       return request.auth.token.email.lower();
     }
-    function isMember(hid) {
-      return signedIn() && myEmail() in get(/databases/$(database)/documents/households/$(hid)).data.members;
+    function kitchen(hid) {
+      return get(/databases/$(database)/documents/households/$(hid)).data;
+    }
+    function family(fid) {
+      return get(/databases/$(database)/documents/families/$(fid)).data;
+    }
+    function inKitchen(hid) {
+      return signedIn() && myEmail() in kitchen(hid).members;
+    }
+    function inFamily(fid) {
+      return signedIn() && myEmail() in family(fid).members;
     }
 
-    // A household is one shared library. Its members are Google account emails.
+    // KITCHEN: one meal plan, shopping list and pantry. Only its members can see it.
     match /households/{hid} {
       allow read: if signedIn() && myEmail() in resource.data.members;
-      // You can only create your own household, with just yourself in it
+      // You can only create your own kitchen, with just yourself in it
       allow create: if signedIn() && hid == request.auth.uid
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.members == [myEmail()];
@@ -26,9 +35,29 @@ service cloud.firestore {
         && request.resource.data.members.size() <= 20;
       allow delete: if signedIn() && resource.data.owner == request.auth.uid;
 
-      // Recipes, meal plan and shopping list: any member
+      // meta/state (plan, list, pantry) and pre-family recipes
       match /{collection}/{document=**} {
-        allow read, write: if isMember(hid);
+        allow read, write: if inKitchen(hid);
+      }
+    }
+
+    // FAMILY: kitchens that pool their recipes.
+    match /families/{fid} {
+      allow read: if signedIn() && myEmail() in resource.data.members;
+      allow create: if signedIn() && fid == request.auth.uid
+        && myEmail() in request.resource.data.members
+        && request.resource.data.members.size() <= 50;
+      allow update: if signedIn() && myEmail() in resource.data.members
+        && request.resource.data.members.size() <= 50;
+      allow delete: if false;
+
+      // Every family member can read every recipe; only the kitchen that added a recipe can change it
+      match /recipes/{rid} {
+        allow read: if inFamily(fid);
+        allow create: if inFamily(fid) && inKitchen(request.resource.data.kitchen);
+        allow update: if inFamily(fid) && inKitchen(resource.data.kitchen)
+          && request.resource.data.kitchen == resource.data.kitchen;
+        allow delete: if inFamily(fid) && inKitchen(resource.data.kitchen);
       }
     }
   }
