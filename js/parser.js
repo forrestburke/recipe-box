@@ -178,7 +178,6 @@ export function parseIngredientLine(raw) {
   // "1 dozen eggs" / "a dozen eggs" -> 12 eggs
   const dozen = s.match(/^dozen\s+/i);
   if (dozen && qty != null) { qty *= 12; if (qtyMax != null) qtyMax *= 12; s = s.slice(dozen[0].length); }
-  else if (qty === 12 && /^dozen$/i.test((original.match(/^\s*(\w+)/) || [])[1] || '')) { /* "dozen eggs" already 12 */ }
 
   // "(14 oz)" size notes right after the quantity
   const paren = s.match(/^\(([^)]*)\)\s*/);
