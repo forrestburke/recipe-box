@@ -23,16 +23,19 @@ service cloud.firestore {
 
     // KITCHEN: one meal plan, shopping list and pantry. Only its members can see it.
     match /households/{hid} {
-      allow read: if signedIn() && myEmail() in resource.data.members;
+      // (resource == null: lets the app confirm a kitchen doesn't exist yet before creating it)
+      allow read: if signedIn() && (resource == null || myEmail() in resource.data.members);
       // You can only create your own kitchen, with just yourself in it
       allow create: if signedIn() && hid == request.auth.uid
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.members == [myEmail()];
-      // Members can invite or remove others, but can't remove themselves or change the owner
+      // Members can invite people and rename the kitchen; only the owner can remove people.
+      // Nobody can remove themselves or change the owner (so the owner can't be locked out).
       allow update: if signedIn() && myEmail() in resource.data.members
         && myEmail() in request.resource.data.members
         && request.resource.data.owner == resource.data.owner
-        && request.resource.data.members.size() <= 20;
+        && request.resource.data.members.size() <= 20
+        && (request.resource.data.members.hasAll(resource.data.members) || request.auth.uid == resource.data.owner);
       allow delete: if signedIn() && resource.data.owner == request.auth.uid;
 
       // meta/state (plan, list, pantry) and pre-family recipes
@@ -43,12 +46,17 @@ service cloud.firestore {
 
     // FAMILY: kitchens that pool their recipes.
     match /families/{fid} {
-      allow read: if signedIn() && myEmail() in resource.data.members;
-      allow create: if signedIn() && fid == request.auth.uid
+      allow read: if signedIn() && (resource == null || myEmail() in resource.data.members);
+      // id is your user id (or your id plus -1 .. -4 if an old one of yours can't be used)
+      allow create: if signedIn() && (fid == request.auth.uid || fid.matches(request.auth.uid + '-[1-4]'))
+        && request.resource.data.createdBy == request.auth.uid
         && myEmail() in request.resource.data.members
         && request.resource.data.members.size() <= 50;
+      // Members can invite people and add their kitchen; only the family's creator can remove people
       allow update: if signedIn() && myEmail() in resource.data.members
-        && request.resource.data.members.size() <= 50;
+        && request.resource.data.members.size() <= 50
+        && request.resource.data.createdBy == resource.data.createdBy
+        && (request.resource.data.members.hasAll(resource.data.members) || request.auth.uid == resource.data.createdBy);
       allow delete: if false;
 
       // Every family member can read every recipe; only the kitchen that added a recipe can change it

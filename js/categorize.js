@@ -6,8 +6,8 @@ export const PROTEIN_LIST = ['chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck'
 
 const PROTEIN_WORDS = {
   chicken: ['chicken', 'poussin', 'cornish hen'],
-  beef: ['beef', 'steak', 'sirloin', 'ribeye', 'rib-eye', 'brisket', 'chuck', 'veal', 'short rib', 'oxtail', 'flank', 'skirt steak', 'tenderloin', 'ground chuck'],
-  pork: ['pork', 'bacon', 'ham', 'prosciutto', 'pancetta', 'chorizo', 'sausage', 'salami', 'pepperoni', 'guanciale', 'lardon', 'bratwurst', 'kielbasa'],
+  beef: ['beef', 'steak', 'sirloin', 'ribeye', 'rib-eye', 'brisket', 'chuck', 'veal', 'short rib', 'oxtail', 'flank', 'skirt steak', 'ground chuck', 'ground meat', 'mince', 'minced meat', 'meatball', 'venison', 'bison', 'elk'],
+  pork: ['pork', 'bacon', 'ham', 'prosciutto', 'pancetta', 'chorizo', 'sausage', 'salami', 'pepperoni', 'guanciale', 'lardon', 'bratwurst', 'kielbasa', 'hot dog', 'frankfurter', 'wiener'],
   lamb: ['lamb', 'mutton'],
   turkey: ['turkey'],
   duck: ['duck'],
@@ -25,7 +25,12 @@ function stripNonProtein(line) {
   return line
     .replace(/\b(chicken|beef|vegetable|fish|bone|turkey|pork|ham|veal|lamb|duck|shrimp)\s+(broth|stock|bouillon|base|fat|drippings|seasoning|gravy|cube|powder)s?\b/gi, ' ')
     .replace(/\b(fish|oyster|clam|anchovy|shrimp)\s+(sauce|juice|paste)\b/gi, ' ')
-    .replace(/\beggplants?\b/gi, ' ');
+    .replace(/\beggplants?\b/gi, ' ')
+    .replace(/\b(cauliflower|mushroom|portobello|cabbage|tofu|celeriac|eggplant)\s+steaks?\b/gi, '$1')
+    .replace(/\b(cut|sliced)\s+into\s+(\w+\s+)?steaks?\b/gi, ' ')
+    .replace(/\b(pork|turkey|chicken|lamb)\s+tenderloin/gi, '$1')
+    .replace(/\b(tuna|salmon|swordfish|halibut|fish)\s+steaks?\b/gi, '$1')
+    .replace(/\b(chicken|turkey|pork|lamb|plant[- ]based|vegan|veggie)\s+(mince|meatballs?|ground meat)\b/gi, '$1');
 }
 
 const TAG_RULES = {
@@ -40,7 +45,7 @@ const TAG_RULES = {
 
 const MEAL_RULES = {
   breakfast: /\b(breakfast|brunch|pancakes?|waffles?|french toast|oatmeal|porridge|granola|omelett?es?|frittata|scrambled|smoothie|hash browns?|benedict|shakshuka|overnight oats|crepes?|breakfast burrito|egg muffins?)\b/i,
-  dessert: /\b(desserts?|(?:lemon|dessert|cookie|granola|seven layer|magic|oat|date) bars|(?:lemon|chocolate|rice krispie) squares|cakes?|cupcakes?|cookies?|brownies?|blondies?|(?<!(pot|shepherd'?s?|cottage|chicken|meat|pork|fish)\s)pies?|puddings?|ice cream|sorbet|cheesecake|mousse|fudge|cobbler|crumble|tiramisu|custard|truffles?|frosting|macarons?|candy|brittle|sundae|panna cotta|trifle|meringue|pavlova|galette|sweet treats?)\b/i,
+  dessert: /\b(desserts?|(?:lemon|dessert|cookie|granola|seven layer|magic|oat|date) bars|(?:lemon|chocolate|rice krispie) squares|(?<!(crab|fish|rice|potato|salmon|corn|pan|griddle|hoe|johnny)\s)cakes?|cupcakes?|cookies?|brownies?|blondies?|(?<!(pot|shepherd'?s?|cottage|chicken|meat|pork|fish)\s)pies?|puddings?|ice cream|sorbet|cheesecake|mousse|fudge|cobbler|crumble|tiramisu|custard|truffles?|frosting|macarons?|candy|brittle|sundae|panna cotta|trifle|meringue|pavlova|galette|sweet treats?)\b/i,
   'baked good': /\b(breads?|loaf|loaves|muffins?|scones?|biscuits?|(?<!(spring|egg|cabbage|summer|lobster|cinnamon)\s)rolls?|bagels?|focaccia|brioche|croissants?|sourdough|cornbread|pretzels?|buns?|baguettes?|flatbreads?|naan|pita|baked goods?|baking|cinnamon rolls?|danish)\b/i,
   side: /\b(side dish|sides?|slaw|coleslaw|mashed potato(es)?|pilaf|roasted (vegetables|veggies|potatoes|carrots|broccoli)|gratin|dinner rolls?)\b/i,
   lunch: /\b(lunch|sandwich(es)?|wraps?|panini|sliders?|lunchbox)\b/i,
@@ -65,7 +70,7 @@ const EXTRA_TAGS = {
 export function categorize(recipe) {
   const title = recipe.title || '';
   const hints = (recipe.hints || []).join(' ');
-  const ingredientText = (recipe.ingredients || []).map(i => typeof i === 'string' ? i : i.raw).join('\n');
+  const ingredientText = (recipe.ingredients || []).map(i => typeof i === 'string' ? i : (i?.raw || '')).join('\n');
   const everything = [title, hints, ingredientText].join('\n');
 
   // Proteins
@@ -94,7 +99,9 @@ export function categorize(recipe) {
   if (mealTypes.includes('dinner') && (mealTypes.includes('dessert') || mealTypes.includes('breakfast')) && !/\b(dinner|main|entr[eé]e|supper)\b/i.test(mealText)) {
     mealTypes.splice(mealTypes.indexOf('dinner'), 1);
   }
-  if (!mealTypes.length) mealTypes.push(primary.length || proteins.length ? 'dinner' : 'dinner');
+  // dinner rolls are a side, not a main
+  if (/\bdinner rolls?\b/i.test(mealText) && mealTypes.includes('dinner')) mealTypes.splice(mealTypes.indexOf('dinner'), 1);
+  if (!mealTypes.length) mealTypes.push('dinner');
 
   // Tags
   const tags = [];
@@ -105,7 +112,7 @@ export function categorize(recipe) {
   for (const [t, rx] of Object.entries(EXTRA_TAGS)) if (rx.test(title + ' ' + hints) || (t === 'pasta' && rx.test(ingredientText))) tags.push(t);
 
   const meatOrFish = ['chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck', 'fish', 'shellfish'].some(p => found.has(p))
-    || /\b(chicken|beef|fish|pork|turkey|bone)\s+(broth|stock|bouillon)|\bfish sauce|\boyster sauce|\bgelatin|\banchov/i.test(ingredientText);
+    || /\b(chicken|beef|fish|pork|turkey|bone)\s+(broth|stock|bouillon)|\bfish sauce|\boyster sauce|\bgelatin|\banchov|\blard\b|\bsuet\b/i.test(ingredientText);
   if (!meatOrFish) {
     tags.push('vegetarian');
     const hasHoney = /\bhoney\b/i.test(ingredientText);

@@ -54,6 +54,8 @@ a { color: var(--accent); }
 .account-chip.off { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .account-chip.off .dot { background: color-mix(in srgb, var(--accent-ink) 55%, transparent); }
 .account-chip.error { color: var(--warn); border-color: var(--warn-soft); }
+.account-chip.offline .dot { background: #d9a53c; }
+.account-chip.offline { color: var(--muted); }
 .account-chip .avatar { position: relative; width: 22px; height: 22px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; font-weight: 600; }
 .account-chip .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 @keyframes pulse { from { opacity: .35; } to { opacity: 1; } }
@@ -148,7 +150,7 @@ button.chip.exclude[aria-pressed="true"]::before { content: '✕'; font-size: 10
 .bulk-item.excluded { opacity: .5; }
 .bulk-item.saved { background: var(--accent-soft); }
 .bulk-inc input { width: 20px; height: 20px; accent-color: var(--accent); }
-.bulk-thumbs { display: flex; gap: 6px; }
+.bulk-thumbs { display: flex; gap: 6px; flex-wrap: wrap; max-width: 220px; }
 .bulk-thumb { position: relative; width: 48px; height: 62px; border-radius: 6px; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; border: 1px solid var(--border); flex: none; }
 .bulk-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .bulk-thumb small { position: absolute; bottom: 1px; right: 3px; font-size: 9px; color: #fff; text-shadow: 0 0 3px #000; }

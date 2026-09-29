@@ -5,6 +5,12 @@
 //   Kitchen  (households/{hid})        one meal plan, shopping list and pantry. Members share all of it.
 //   Family   (families/{fid})          a group of kitchens that pool their recipes.
 //   Recipe   (families/{fid}/recipes)  tagged with the kitchen that added it; only that kitchen can edit it.
+//
+// Sync rules
+//   - Local changes are queued in data.pending / data.stateDirty (kept in localStorage) until the cloud
+//     confirms them, so nothing is lost if the app is closed while offline.
+//   - The cloud copy of the plan/list wins unless this device has unsaved changes for that same kitchen.
+//   - Our own writes echoing back are recognised and skipped; everyone else's changes are applied.
 import { config } from './config.js';
 
 const KEY = 'recipe-planner.v1';
@@ -27,24 +33,36 @@ function defaultState() {
   };
 }
 function defaults() {
-  // stateKitchen: which kitchen plan/shopping/settings belong to (undefined = this browser only)
-  return { recipes: [], ...defaultState(), updatedAt: 0, stateKitchen: undefined };
+  return {
+    recipes: [],
+    ...defaultState(),
+    stateKitchen: undefined, // kitchen the plan/list/pantry belong to (undefined = this browser only)
+    stateUpdatedAt: 0,
+    stateDirty: false,       // plan/list/pantry changed here and not yet saved to the cloud
+    pending: { up: [], del: [] }, // recipe ids saved/deleted here and not yet confirmed by the cloud
+    updatedAt: 0,
+  };
 }
 
 let data = defaults();
 const listeners = new Set();
-let cloud = null;     // set while signed in, see connectKitchen()
+let cloud = null;       // set once connected to a kitchen, see connectKitchen()
 let cloudError = '';
-let cloudReady = false; // false until Firebase has told us whether someone is signed in
+let cloudOffline = false;
+let cloudReady = false; // false while Firebase is checking the sign-in or connecting
 const notify = (changed) => listeners.forEach(fn => fn(changed));
 
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const saved = JSON.parse(raw);
-      const d = defaults();
-      data = { ...d, ...saved, settings: { ...d.settings, ...saved.settings } };
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    const d = defaults();
+    data = { ...d, ...saved, settings: { ...d.settings, ...saved.settings } };
+    if (!saved.pending) {
+      // saved by an older version: recipes never tied to a kitchen still need uploading
+      data.pending = { up: data.recipes.filter(r => !r.kitchen).map(r => r.id), del: [] };
+      data.stateUpdatedAt = saved.updatedAt || 0;
     }
   } catch (e) { console.warn('Could not read saved data', e); }
 }
@@ -54,24 +72,39 @@ function saveLocal() {
   catch (e) { alert('Could not save to this browser (storage full?). Export a backup from Settings.'); }
 }
 
+const mark = (list, id) => { if (!data.pending[list].includes(id)) data.pending[list].push(id); };
+const unmark = (list, id) => { data.pending[list] = data.pending[list].filter(x => x !== id); };
+
 function persist(changed) {
+  if (changed.all || changed.plan || changed.shopping || changed.settings) {
+    data.stateUpdatedAt = Date.now();
+    data.stateDirty = true;
+  }
+  if (changed.recipe) { mark('up', changed.recipe.id); unmark('del', changed.recipe.id); }
+  if (changed.deletedRecipe) { mark('del', changed.deletedRecipe); unmark('up', changed.deletedRecipe); }
+  if (changed.all) data.recipes.filter(isMine).forEach(r => mark('up', r.id));
   data.updatedAt = Date.now();
   saveLocal();
-  if (cloud) pushCloud(changed).catch(e => { console.warn('Cloud sync failed', e); cloudError = 'Sync failed: ' + e.message; notify({ cloud: true }); });
+  flush();
   notify(changed);
 }
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-const isMine = (r) => !cloud || !r?.kitchen || r.kitchen === cloud.hid;
-const kitchenName = (id) => cloud?.kitchens?.[id] || (id === cloud?.hid ? cloud.kitchenName : '') || 'another kitchen';
+// The kitchen this device is working in: the connected one, or (while connecting / offline) the last one
+const homeKitchen = () => cloud?.hid ?? (data.stateKitchen && data.stateKitchen !== 'switching' ? data.stateKitchen : null);
+const isMine = (r) => !r?.kitchen || r.kitchen === homeKitchen();
+const kitchenName = (id) => cloud?.kitchens?.[id] || (id === cloud?.hid ? cloud.kitchenName : '') || data.recipes.find(r => r.kitchen === id)?.kitchenName || 'another kitchen';
 
 function assertMine(r) {
   if (r && !isMine(r)) throw new Error(`This recipe belongs to ${kitchenName(r.kitchen)}. Use "Copy to my kitchen" to make your own version.`);
 }
 
 export const store = {
-  init() { load(); if (config.firebase) initCloud().catch(e => { cloudError = e.message; cloudReady = true; notify({ cloud: true }); }); },
+  init() {
+    load();
+    if (config.firebase) initCloud().catch(e => { cloudError = e.message; cloudReady = true; notify({ cloud: true }); });
+  },
   onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
 
   recipes() { return data.recipes; },
@@ -82,7 +115,8 @@ export const store = {
   saveRecipe(r) {
     assertMine(data.recipes.find(x => x.id === r.id));
     r = { ...r, id: r.id || uid(), updatedAt: Date.now(), createdAt: r.createdAt || Date.now() };
-    if (cloud) { r.kitchen = cloud.hid; r.kitchenName = cloud.kitchenName; }
+    const home = homeKitchen();
+    if (home) { r.kitchen = home; r.kitchenName = cloud?.kitchenName || r.kitchenName || kitchenName(home); }
     const i = data.recipes.findIndex(x => x.id === r.id);
     if (i === -1) data.recipes.push(r); else data.recipes[i] = r;
     persist({ recipe: r });
@@ -105,17 +139,22 @@ export const store = {
   settings() { return data.settings; },
   updateSettings(patch) { data.settings = { ...data.settings, ...patch }; persist({ settings: true }); },
 
-  exportJSON() { return JSON.stringify({ app: 'recipe-planner', version: 2, ...data, recipes: data.recipes.filter(isMine) }, null, 2); },
+  exportJSON() {
+    const { pending, stateDirty, stateKitchen, ...rest } = data;
+    return JSON.stringify({ app: 'recipe-planner', version: 2, ...rest, recipes: data.recipes.filter(isMine) }, null, 2);
+  },
   importJSON(text, mode = 'merge') {
     const incoming = JSON.parse(text);
     if (!Array.isArray(incoming.recipes)) throw new Error('Not a recipe-planner backup file');
-    const mine = incoming.recipes.map(r => cloud ? { ...r, kitchen: cloud.hid, kitchenName: cloud.kitchenName } : r);
-    if (mode === 'replace') data = { ...defaults(), ...incoming, recipes: mine };
-    else {
-      const byId = new Map(data.recipes.map(r => [r.id, r]));
-      for (const r of mine) if (isMine(byId.get(r.id))) byId.set(r.id, r);
-      data.recipes = [...byId.values()];
-    }
+    const home = homeKitchen();
+    const now = Date.now();
+    // restored recipes become this kitchen's, stamped now so they are uploaded rather than taken for deletions
+    const mine = incoming.recipes.map(r => ({ ...r, kitchen: home || undefined, kitchenName: home ? kitchenName(home) : undefined, updatedAt: now }));
+    const byId = new Map((mode === 'replace' ? [] : data.recipes).map(r => [r.id, r]));
+    for (const r of mine) if (isMine(byId.get(r.id))) byId.set(r.id, r);
+    data.recipes = [...byId.values()];
+    if (mode === 'replace') Object.assign(data, { plan: incoming.plan ?? null, shopping: incoming.shopping || data.shopping, settings: { ...data.settings, ...(incoming.settings || {}) } });
+    mine.forEach(r => mark('up', r.id));
     persist({ all: true });
   },
 
@@ -126,16 +165,16 @@ export const store = {
     return [...ids].map(id => ({ id, name: kitchenName(id), mine: id === cloud.hid }))
       .sort((a, b) => (b.mine - a.mine) || a.name.localeCompare(b.name));
   },
-  currentKitchen() { return cloud ? cloud.hid : 'local'; },
+  currentKitchen() { return homeKitchen() || 'local'; },
 
   cloudStatus() {
     if (!config.firebase) return null;
-    if (!cloud) return { signedIn: false, loading: !cloudReady, error: cloudError };
+    if (!cloud) return { signedIn: false, loading: !cloudReady, error: cloudError, offline: cloudOffline, email: fbUser ? normEmail(fbUser.email) : '' };
     return {
-      signedIn: true, loading: !cloudReady, error: cloudError,
+      signedIn: true, loading: !cloudReady, error: cloudError, offline: cloudOffline,
       name: cloud.name, email: cloud.email, photo: cloud.photo,
       kitchenId: cloud.hid, kitchenName: cloud.kitchenName, members: cloud.members, isOwner: cloud.owner === cloud.uid,
-      familyMembers: cloud.familyMembers || [], kitchens: store.kitchens(),
+      familyMembers: cloud.familyMembers || [], isFamilyAdmin: cloud.familyCreatedBy === cloud.uid, kitchens: store.kitchens(),
       myKitchens: cloud.myKitchens || [],
     };
   },
@@ -152,9 +191,12 @@ export const store = {
 // ---------------- Firebase ----------------
 const FB = 'https://www.gstatic.com/firebasejs/12.19.0/';
 let fbAuth = null, fbMods = null, fbDb = null, fbUser = null, unsubscribers = [];
+let connection = 0; // bumped whenever a new connect starts; older ones stop at their next step
 const clean = (o) => JSON.parse(JSON.stringify(o)); // Firestore rejects undefined
 const normEmail = (e) => String(e || '').trim().toLowerCase();
 const validEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+const STALE = Symbol('stale');
+const isOfflineError = (e) => e?.code === 'unavailable' || /offline|network|unavailable/i.test(e?.message || '');
 
 async function initCloud() {
   const [{ initializeApp }, auth, fs] = await Promise.all([
@@ -175,26 +217,36 @@ async function initCloud() {
   }
   notify({ cloud: true }); // "connecting…" while Firebase checks the sign-in
   auth.getRedirectResult(fbAuth).catch(() => {});
-  auth.onAuthStateChanged(fbAuth, async (user) => {
-    stopListening();
+  auth.onAuthStateChanged(fbAuth, (user) => connectUser(user));
+  // came back online after failing to connect: try again
+  window.addEventListener('online', () => { if (fbUser && !cloud) connectUser(fbUser); });
+}
+
+async function connectUser(user, preferredKitchen) {
+  const my = ++connection;
+  stopListening();
+  cloud = null;
+  cloudError = '';
+  cloudOffline = false;
+  fbUser = user;
+  if (!user) { cloudReady = true; return notify({ cloud: true }); }
+  cloudReady = false;
+  notify({ cloud: true });
+  try {
+    const kitchens = await myKitchens(user);
+    if (my !== connection) return;
+    const want = preferredKitchen || localStorage.getItem(kitchenKey());
+    await connectKitchen(kitchens.find(k => k.id === want) || kitchens[0], kitchens, my);
+  } catch (e) {
+    if (e === STALE || my !== connection) return;
+    console.error(e);
     cloud = null;
-    cloudError = '';
-    fbUser = user;
-    if (!user) { cloudReady = true; return notify({ cloud: true }); }
-    cloudReady = false;
-    notify({ cloud: true });
-    try {
-      const kitchens = await myKitchens(user);
-      const saved = localStorage.getItem(kitchenKey());
-      await connectKitchen(kitchens.find(k => k.id === saved) || kitchens[0], kitchens);
-    } catch (e) {
-      console.error(e);
-      cloud = null;
-      cloudError = 'Could not connect to your kitchen: ' + e.message;
-    }
-    cloudReady = true;
-    notify({ all: true, cloud: true });
-  });
+    if (isOfflineError(e)) { cloudOffline = true; cloudError = ''; }
+    else cloudError = 'Could not connect to your kitchen: ' + e.message;
+  }
+  if (my !== connection) return;
+  cloudReady = true;
+  notify({ all: true, cloud: true });
 }
 
 function stopListening() {
@@ -202,16 +254,22 @@ function stopListening() {
   unsubscribers = [];
 }
 
-// Kitchens this person belongs to. Creates one ("Forrest's kitchen") on first sign-in.
+// Kitchens this person belongs to. Creates one ("Forrest's kitchen") on first sign-in, but only once
+// the server itself confirms there's none (a cached empty answer while offline must never create one).
 async function myKitchens(user) {
   const { fs } = fbMods;
   const email = normEmail(user.email);
-  const snap = await fs.getDocs(fs.query(fs.collection(fbDb, 'households'), fs.where('members', 'array-contains', email)));
+  const snap = await fs.getDocsFromServer(fs.query(fs.collection(fbDb, 'households'), fs.where('members', 'array-contains', email)));
   let list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   if (!list.length) {
+    const ref = fs.doc(fbDb, 'households', user.uid);
+    let exists = false;
+    try { exists = (await fs.getDocFromServer(ref)).exists(); }
+    catch (e) { if (e.code === 'permission-denied') throw new Error('Your kitchen exists but you are no longer a member of it. Ask a family member to add you back.'); throw e; }
+    if (exists) throw new Error('Your kitchen could not be loaded. Please try again.');
     const first = (user.displayName || email).split(/[\s@]/)[0];
     const hh = { owner: user.uid, members: [email], name: `${first}'s kitchen`, createdAt: Date.now() };
-    await fs.setDoc(fs.doc(fbDb, 'households', user.uid), hh);
+    await fs.setDoc(ref, hh);
     list = [{ id: user.uid, ...hh }];
   }
   // Default: a kitchen shared with others (e.g. the one your partner invited you to), then your own
@@ -221,34 +279,34 @@ async function myKitchens(user) {
 
 async function switchKitchen(hid) {
   if (!cloud || hid === cloud.hid) return;
-  const kitchens = await myKitchens(fbUser); // fresh, complete kitchen records
-  const target = kitchens.find(k => k.id === hid);
-  if (!target) throw new Error('Kitchen not found');
-  localStorage.setItem(kitchenKey(), hid);
-  stopListening();
+  const previous = cloud.hid;
+  // save this kitchen's pending changes first (don't wait forever if offline)
+  await Promise.race([flushing, new Promise(r => setTimeout(r, 4000))]);
   // The other kitchen has its own plan, list and pantry: start from its cloud copy
-  Object.assign(data, defaultState(), { stateKitchen: 'switching', updatedAt: 0 });
-  cloud = null;
-  cloudReady = false;
-  notify({ all: true, cloud: true });
-  try { await connectKitchen(target, kitchens); }
-  catch (e) { cloudError = 'Could not open that kitchen: ' + e.message; }
-  cloudReady = true;
-  notify({ all: true, cloud: true });
+  Object.assign(data, defaultState(), { stateKitchen: 'switching', stateUpdatedAt: 0, stateDirty: false });
+  saveLocal();
+  await connectUser(fbUser, hid);
+  if (!cloud || cloud.hid !== hid) {
+    const err = cloudError || 'Could not open that kitchen.';
+    await connectUser(fbUser, previous); // go back to where we were
+    throw new Error(err);
+  }
 }
 
-async function connectKitchen(hh, allKitchens) {
+async function connectKitchen(hh, allKitchens, my) {
   const { fs } = fbMods;
+  const live = () => { if (my !== connection) throw STALE; };
   const email = normEmail(fbUser.email);
   const name = hh.name || `${(fbUser.displayName || email).split(/[\s@]/)[0]}'s kitchen`;
   const hhRef = fs.doc(fbDb, 'households', hh.id);
   const legacy = !hh.family; // created before families existed: recipes still live under the kitchen
 
   const fam = await resolveFamily(hh, email, name);
-  cloud = {
+  live();
+  const c = {
     uid: fbUser.uid, email, name: fbUser.displayName || fbUser.email, photo: fbUser.photoURL || '',
     hid: hh.id, kitchenName: name, members: hh.members, owner: hh.owner,
-    fid: fam.id, familyMembers: fam.members, kitchens: { ...(fam.kitchens || {}), [hh.id]: name },
+    fid: fam.id, familyMembers: fam.members, familyCreatedBy: fam.createdBy, kitchens: { ...(fam.kitchens || {}), [hh.id]: name },
     myKitchens: allKitchens.map(k => ({ id: k.id, name: k.id === hh.id ? name : (k.name || 'Kitchen') })),
   };
 
@@ -260,6 +318,7 @@ async function connectKitchen(hh, allKitchens) {
   if (missing.length) famPatch.members = fs.arrayUnion(...missing);
   if (Object.keys(famPatch).length) await fs.updateDoc(famRef, famPatch);
   if (hh.family !== fam.id || !hh.name) await fs.updateDoc(hhRef, { family: fam.id, name });
+  live();
 
   // Move recipes into the family library
   if (legacy) await copyRecipes(fs.collection(fbDb, 'households', hh.id, 'recipes'), fam.id, hh.id, name);
@@ -268,23 +327,41 @@ async function connectKitchen(hh, allKitchens) {
     const old = fs.query(fs.collection(fbDb, 'families', hh.family, 'recipes'), fs.where('kitchen', '==', hh.id));
     await copyRecipes(old, fam.id, hh.id, name).catch(e => console.warn('Could not copy from old family', e));
   }
+  live();
 
-  await syncRecipes();
-  await syncState();
+  await syncRecipes(c);
+  live();
+  await syncState(c);
+  live();
+  cloud = c;
   localStorage.setItem(kitchenKey(), hh.id);
-  listenForChanges();
+  saveLocal();
+  listenForChanges(c);
+  flush();
 }
 
-// The family this kitchen uses: the largest one this person belongs to; creates one if needed
+// The family this kitchen uses. A kitchen stays in its family if that family is actually shared;
+// a kitchen whose family is just itself joins a family it has been invited to (the largest one).
 async function resolveFamily(hh, email, name) {
   const { fs } = fbMods;
-  const snap = await fs.getDocs(fs.query(fs.collection(fbDb, 'families'), fs.where('members', 'array-contains', email)));
-  const fams = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-    .sort((a, b) => (b.members.length - a.members.length) || ((b.id === hh.family) - (a.id === hh.family)) || a.id.localeCompare(b.id));
-  if (fams.length) return fams[0];
+  const snap = await fs.getDocsFromServer(fs.query(fs.collection(fbDb, 'families'), fs.where('members', 'array-contains', email)));
+  const fams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const current = fams.find(f => f.id === hh.family);
+  const shared = (f) => Object.keys(f.kitchens || {}).some(k => k !== hh.id) || f.members.some(m => !hh.members.includes(m));
+  if (current && shared(current)) return current;
+  const best = fams.sort((a, b) => (b.members.length - a.members.length) || ((b.id === hh.family) - (a.id === hh.family)) || a.id.localeCompare(b.id))[0];
+  if (best) return best;
+  // Create one (id = your user id, or your id plus a number if that one exists but isn't yours any more)
   const fam = { members: [...new Set([email, ...hh.members])], kitchens: { [hh.id]: name }, createdBy: fbUser.uid, createdAt: Date.now() };
-  await fs.setDoc(fs.doc(fbDb, 'families', fbUser.uid), fam);
-  return { id: fbUser.uid, ...fam };
+  for (let n = 0; n < 5; n++) {
+    const id = n ? `${fbUser.uid}-${n}` : fbUser.uid;
+    const ref = fs.doc(fbDb, 'families', id);
+    try { if ((await fs.getDocFromServer(ref)).exists()) continue; }
+    catch (e) { if (e.code === 'permission-denied') continue; throw e; }
+    await fs.setDoc(ref, fam);
+    return { id, ...fam };
+  }
+  throw new Error('Could not set up your family library.');
 }
 
 async function copyRecipes(sourceQuery, fid, hid, name) {
@@ -297,45 +374,43 @@ async function copyRecipes(sourceQuery, fid, hid, name) {
   }
 }
 
-const recipesCol = () => fbMods.fs.collection(fbDb, 'families', cloud.fid, 'recipes');
-const recipeDoc = (id) => fbMods.fs.doc(fbDb, 'families', cloud.fid, 'recipes', id);
-const stateDoc = () => fbMods.fs.doc(fbDb, 'households', cloud.hid, 'meta', 'state');
+const recipesCol = (c) => fbMods.fs.collection(fbDb, 'families', c.fid, 'recipes');
+const recipeDoc = (c, id) => fbMods.fs.doc(fbDb, 'families', c.fid, 'recipes', id);
+const stateDoc = (c) => fbMods.fs.doc(fbDb, 'households', c.hid, 'meta', 'state');
 
-// Merge this browser's recipes with the family library
-async function syncRecipes() {
+// Merge with the family library: the cloud copy wins, except for changes made on this device that
+// haven't been confirmed yet (data.pending), which are kept and uploaded by flush()
+async function syncRecipes(c) {
   const { fs } = fbMods;
-  const joinedKey = `recipe-planner.joined.${cloud.fid}.${cloud.hid}`;
-  const legacyKey = `recipe-planner.joined.${cloud.hid}`;
-  const lastSync = +localStorage.getItem(joinedKey) || +localStorage.getItem(legacyKey) || 0;
-  const remote = (await fs.getDocs(recipesCol())).docs.map(d => ({ ...d.data(), id: d.id }));
+  const remote = (await fs.getDocsFromServer(recipesCol(c))).docs.map(d => ({ ...d.data(), id: d.id }));
   const byId = new Map(remote.map(r => [r.id, r]));
-  const upload = [];
   for (const r of data.recipes) {
-    if (r.kitchen && r.kitchen !== cloud.hid) continue; // someone else's: the cloud copy wins
+    if (!data.pending.up.includes(r.id)) continue;
     const other = byId.get(r.id);
-    const mine = { ...r, kitchen: cloud.hid, kitchenName: cloud.kitchenName };
-    if (other) {
-      if (other.kitchen === cloud.hid && (r.updatedAt || 0) > (other.updatedAt || 0)) { byId.set(r.id, mine); upload.push(mine); }
-    } else if (!r.kitchen && (!lastSync || (r.updatedAt || 0) > lastSync)) {
-      // only in this browser: new since last sync (otherwise it was deleted elsewhere)
-      byId.set(r.id, mine); upload.push(mine);
-    }
+    if ((r.kitchen && r.kitchen !== c.hid) || (other && other.kitchen && other.kitchen !== c.hid)) { unmark('up', r.id); continue; } // not ours to change
+    byId.set(r.id, { ...r, kitchen: c.hid, kitchenName: c.kitchenName });
+  }
+  for (const id of data.pending.del) {
+    const other = byId.get(id);
+    if (other && other.kitchen && other.kitchen !== c.hid) { unmark('del', id); continue; }
+    byId.delete(id);
   }
   data.recipes = [...byId.values()];
-  saveLocal();
-  for (const r of upload) await fs.setDoc(recipeDoc(r.id), clean(r));
-  localStorage.setItem(joinedKey, String(Date.now()));
 }
 
-async function syncState() {
+// Plan, list and pantry: the cloud copy wins unless this device has unsaved changes for this kitchen
+async function syncState(c) {
   const { fs } = fbMods;
-  const snap = await fs.getDoc(stateDoc());
+  const snap = await fs.getDocFromServer(stateDoc(c));
   const s = snap.exists() ? snap.data() : null;
-  const ours = data.stateKitchen === cloud.hid || data.stateKitchen === undefined; // undefined: this browser before sign-in
-  if (s && (!ours || (s.updatedAt || 0) >= (data.updatedAt || 0))) applyState(s);
-  data.stateKitchen = cloud.hid;
-  saveLocal();
-  if (!s || (ours && (s.updatedAt || 0) < (data.updatedAt || 0))) await pushState();
+  const localForThisKitchen = data.stateKitchen === c.hid;
+  const unclaimed = data.stateKitchen === undefined; // this browser before first sign-in
+  if (s && !(localForThisKitchen && data.stateDirty)) { applyState(s); data.stateDirty = false; }
+  else if (!s) {
+    if (!localForThisKitchen && !unclaimed) Object.assign(data, defaultState()); // new kitchen: start fresh
+    data.stateDirty = true; // nothing in the cloud yet: save ours
+  }
+  data.stateKitchen = c.hid;
 }
 
 function applyState(s) {
@@ -344,63 +419,102 @@ function applyState(s) {
     plan: s.plan ?? null,
     shopping: s.shopping || d.shopping,
     settings: { ...d.settings, ...(s.settings || {}) },
-    updatedAt: s.updatedAt || 0,
+    stateUpdatedAt: s.stateUpdatedAt ?? s.updatedAt ?? 0,
   });
 }
 
-// Live updates from the rest of the kitchen / family
-function listenForChanges() {
-  const { fs } = fbMods;
-  const joinedKey = `recipe-planner.joined.${cloud.fid}.${cloud.hid}`;
-  const onError = (e) => { cloudError = 'Live sync stopped: ' + e.message; notify({ cloud: true }); };
+const ourStamps = new Set(); // plan/list versions this device wrote, so their echoes are ignored
 
-  unsubscribers.push(fs.onSnapshot(recipesCol(), snap => {
-    if (snap.metadata.hasPendingWrites) return; // our own write echoing back
+// Live updates from the rest of the kitchen / family
+function listenForChanges(c) {
+  const { fs } = fbMods;
+  const onError = (e) => { cloudError = 'Live sync stopped: ' + e.message; notify({ cloud: true }); };
+  const current = () => cloud === c;
+
+  unsubscribers.push(fs.onSnapshot(recipesCol(c), snap => {
+    if (!current()) return;
     let changed = false;
     for (const ch of snap.docChanges()) {
-      const r = { ...ch.doc.data(), id: ch.doc.id };
-      const i = data.recipes.findIndex(x => x.id === r.id);
+      if (ch.doc.metadata.hasPendingWrites) continue; // our own write
+      const id = ch.doc.id;
+      if (data.pending.up.includes(id) || data.pending.del.includes(id)) continue; // our unsaved change wins
+      const r = { ...ch.doc.data(), id };
+      const i = data.recipes.findIndex(x => x.id === id);
       if (ch.type === 'removed') { if (i !== -1) { data.recipes.splice(i, 1); changed = true; } }
       else if (i === -1) { data.recipes.push(r); changed = true; }
-      else if ((r.updatedAt || 0) > (data.recipes[i].updatedAt || 0) || r.kitchen !== data.recipes[i].kitchen) { data.recipes[i] = r; changed = true; }
+      else if (JSON.stringify(data.recipes[i]) !== JSON.stringify(r)) { data.recipes[i] = r; changed = true; }
     }
     if (changed) { saveLocal(); notify({ all: true, remote: true }); }
-    localStorage.setItem(joinedKey, String(Date.now()));
   }, onError));
 
-  unsubscribers.push(fs.onSnapshot(stateDoc(), snap => {
-    if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+  unsubscribers.push(fs.onSnapshot(stateDoc(c), snap => {
+    if (!current() || !snap.exists() || snap.metadata.hasPendingWrites) return;
     const s = snap.data();
-    if ((s.updatedAt || 0) > (data.updatedAt || 0)) { applyState(s); saveLocal(); notify({ all: true, remote: true }); }
+    const stamp = s.stateUpdatedAt ?? s.updatedAt;
+    if (ourStamps.has(stamp) || data.stateDirty) return; // our own save echoing back, or ours is about to replace it
+    applyState(s);
+    saveLocal();
+    notify({ all: true, remote: true });
   }, onError));
 
-  unsubscribers.push(fs.onSnapshot(fs.doc(fbDb, 'households', cloud.hid), snap => {
-    if (!snap.exists() || !cloud) return;
+  unsubscribers.push(fs.onSnapshot(fs.doc(fbDb, 'households', c.hid), snap => {
+    if (!current() || !snap.exists()) return;
     const h = snap.data();
-    cloud.members = h.members;
-    if (h.name) cloud.kitchenName = h.name;
+    c.members = h.members;
+    if (h.name) c.kitchenName = h.name;
     notify({ cloud: true });
   }, onError));
 
-  unsubscribers.push(fs.onSnapshot(fs.doc(fbDb, 'families', cloud.fid), snap => {
-    if (!snap.exists() || !cloud) return;
+  unsubscribers.push(fs.onSnapshot(fs.doc(fbDb, 'families', c.fid), snap => {
+    if (!current() || !snap.exists()) return;
     const f = snap.data();
-    cloud.familyMembers = f.members;
-    cloud.kitchens = { ...(f.kitchens || {}), [cloud.hid]: cloud.kitchenName };
+    c.familyMembers = f.members;
+    c.familyCreatedBy = f.createdBy;
+    c.kitchens = { ...(f.kitchens || {}), [c.hid]: c.kitchenName };
     notify({ cloud: true, all: true });
   }, onError));
 }
 
-function pushState() {
-  return fbMods.fs.setDoc(stateDoc(), clean({ plan: data.plan, shopping: data.shopping, settings: data.settings, updatedAt: data.updatedAt }));
+// Upload everything waiting in data.pending / stateDirty, one batch at a time
+let flushing = Promise.resolve();
+function flush() {
+  flushing = flushing.then(doFlush).catch(e => {
+    console.warn('Cloud sync failed', e);
+    if (isOfflineError(e)) cloudOffline = true;
+    else cloudError = 'Sync failed: ' + e.message;
+    notify({ cloud: true });
+  });
+  return flushing;
 }
 
-async function pushCloud(changed) {
+async function doFlush() {
+  const c = cloud;
+  if (!c) return;
   const { fs } = fbMods;
-  if (changed.recipe) await fs.setDoc(recipeDoc(changed.recipe.id), clean(changed.recipe));
-  if (changed.deletedRecipe) await fs.deleteDoc(recipeDoc(changed.deletedRecipe));
-  if (changed.all) for (const r of data.recipes.filter(isMine)) await fs.setDoc(recipeDoc(r.id), clean({ ...r, kitchen: cloud.hid, kitchenName: cloud.kitchenName }));
-  if (changed.all || changed.plan || changed.shopping || changed.settings) await pushState();
+  for (const id of [...data.pending.up]) {
+    const r = data.recipes.find(x => x.id === id);
+    if (!r || (r.kitchen && r.kitchen !== c.hid)) { unmark('up', id); continue; }
+    const version = r.updatedAt;
+    await fs.setDoc(recipeDoc(c, id), clean({ ...r, kitchen: c.hid, kitchenName: c.kitchenName }));
+    if (cloud !== c) return;
+    if (data.recipes.find(x => x.id === id)?.updatedAt === version) unmark('up', id); // unless edited again meanwhile
+    saveLocal();
+  }
+  for (const id of [...data.pending.del]) {
+    await fs.deleteDoc(recipeDoc(c, id));
+    if (cloud !== c) return;
+    unmark('del', id);
+    saveLocal();
+  }
+  if (data.stateDirty && data.stateKitchen === c.hid) {
+    const stamp = data.stateUpdatedAt || Date.now();
+    ourStamps.add(stamp);
+    await fs.setDoc(stateDoc(c), clean({ plan: data.plan, shopping: data.shopping, settings: data.settings, stateUpdatedAt: stamp, updatedAt: stamp }));
+    if (cloud !== c) return;
+    if (data.stateUpdatedAt === stamp) data.stateDirty = false;
+    saveLocal();
+  }
+  if (cloudOffline || cloudError.startsWith('Sync failed')) { cloudOffline = false; cloudError = ''; notify({ cloud: true }); }
 }
 
 function checkEmail(email) {
@@ -410,19 +524,25 @@ function checkEmail(email) {
   return e;
 }
 
-// Kitchen members share the meal plan and shopping list (and are also in the family)
+// Kitchen members share the meal plan and shopping list (and are also in the family).
+// Anyone in the kitchen can add people; only the kitchen's owner can remove them.
 async function updateKitchenMembers(email, action) {
   const e = checkEmail(email);
   if (action === 'remove' && e === cloud.email) throw new Error("You can't remove yourself");
+  if (action === 'remove' && cloud.owner !== cloud.uid) throw new Error('Only the person who set up this kitchen can remove people.');
   const { fs } = fbMods;
   if (action === 'add') await fs.updateDoc(fs.doc(fbDb, 'families', cloud.fid), { members: fs.arrayUnion(e) });
   await fs.updateDoc(fs.doc(fbDb, 'households', cloud.hid), { members: action === 'add' ? fs.arrayUnion(e) : fs.arrayRemove(e) });
 }
 
-// Family members see everyone's recipes but get their own kitchen
+// Family members see everyone's recipes but get their own kitchen.
+// Anyone in the family can invite; only the person who set up the family can remove people.
 async function updateFamilyMembers(email, action) {
   const e = checkEmail(email);
-  if (action === 'remove' && cloud.members.includes(e)) throw new Error(`${e} shares your kitchen. Remove them from your kitchen first.`);
+  if (action === 'remove') {
+    if (cloud.members.includes(e)) throw new Error(`${e} shares your kitchen. Remove them from your kitchen first.`);
+    if (cloud.familyCreatedBy !== cloud.uid) throw new Error('Only the person who set up the family can remove people from it.');
+  }
   const { fs } = fbMods;
   await fs.updateDoc(fs.doc(fbDb, 'families', cloud.fid), { members: action === 'add' ? fs.arrayUnion(e) : fs.arrayRemove(e) });
 }
@@ -451,11 +571,17 @@ async function cloudSignIn() {
     else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') throw e;
   }
 }
+
 async function cloudSignOut() {
   if (!fbAuth) return;
+  // give unsaved changes a moment to reach the cloud (don't hang if offline)
+  await Promise.race([flushing, new Promise(r => setTimeout(r, 4000))]);
+  connection++; // stop any connect still in progress
+  stopListening();
+  cloud = null;
   await fbMods.auth.signOut(fbAuth);
-  // Don't leave the family's recipes behind in this browser
-  data = { ...defaults(), recipes: data.recipes.filter(r => !r.kitchen) };
+  // Nothing of this person's is left behind for the next person using this browser
+  data = defaults();
   saveLocal();
   notify({ all: true, cloud: true });
 }

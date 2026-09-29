@@ -149,3 +149,72 @@ test('Google Doc recipe: no Directions heading, paragraphs as steps', () => {
   assert.equal(googleDocId('https://docs.google.com/document/d/1AxWfzg4M69PWOAhC1ZVc1I56AUE09-m6pkknL5BmmA0/edit?tab=t.0'), '1AxWfzg4M69PWOAhC1ZVc1I56AUE09-m6pkknL5BmmA0');
   assert.equal(googleDocId('https://docs.google.com/spreadsheets/d/abcdefghijklmnopqrstuvwxyz/edit'), null);
 });
+
+test('combined ingredient lines are split', () => {
+  const cs = parseIngredients(['Cinnamon sugar - ½ C sugar and 2 T of cinnamon']);
+  assert.equal(cs.length, 2);
+  assert.deepEqual(cs.map(i => [i.qty, i.unit, i.key]), [[0.5, 'cup', 'sugar'], [2, 'tbsp', 'cinnamon']]);
+  assert.ok(cs.every(i => i.raw === 'Cinnamon sugar - ½ C sugar and 2 T of cinnamon' && i.note.includes('cinnamon sugar')));
+  assert.equal(parseIngredients(['For the glaze: 1 cup powdered sugar, 2 tbsp milk']).length, 2);
+  assert.equal(parseIngredients(['1 cup sugar and 2 tbsp cinnamon']).length, 2);
+  const flour = parseIngredients(['4 and 1/2 cups flour']);
+  assert.equal(flour.length, 1); assert.equal(flour[0].qty, 4.5);
+  assert.equal(parseIngredients(['2 tablespoons butter plus more for greasing']).length, 1);
+  assert.equal(parseIngredients(['1 (14 oz) can tomatoes']).length, 1);
+});
+
+
+import { categorize as categorizeR } from '../js/categorize.js';
+import { isPantryItem, scaleIngredientText as scaleR, formatQty as fmtR } from '../js/shopping.js';
+import { matchesFilters as mf, generatePlan as gp, dateRange as dr } from '../js/planner.js';
+import { cleanOcrText, isoDurationToMinutes, parseQuantity } from '../js/parser.js';
+
+test('review fixes: ingredient parsing', () => {
+  const one = (t) => parseIngredients([t]);
+  assert.equal(one('1 lb. boneless, skinless chicken breasts')[0].key, 'chicken breast');
+  assert.equal(one('1-1/2 cups flour')[0].qty, 1.5);
+  assert.equal(parseQuantity('1-1/2').qty, 1.5);
+  assert.equal(one('2-3 cloves garlic')[0].qtyMax, 3);
+  assert.equal(one('1 cup hot sauce')[0].key, 'hot sauce');
+  assert.equal(one('2 cups hot water')[0].key, 'water');
+  assert.equal(one('1 dozen eggs')[0].qty, 12);
+  assert.deepEqual([one('juice of 2 limes')[0].qty, one('juice of 2 limes')[0].key], [2, 'lime']);
+  assert.equal(one('2,5 dl milk')[0].unit, 'dl');
+  assert.equal(scaleR(parseIngredientLine('3 garlic cloves'), 2), '6 cloves garlic');
+  assert.deepEqual(parseIngredients([null, 123, '1 cup rice']).map(i => i.key), ['rice']);
+  assert.equal(cleanOcrText('Bake at 350o F'), 'Bake at 350° F');
+  assert.equal(cleanOcrText('Simmer 9o minutes'), 'Simmer 90 minutes');
+  assert.equal(isoDurationToMinutes('PT0.5H'), 30);
+});
+
+test('review fixes: categorising', () => {
+  const cat = (title, ings) => categorizeR({ title, ingredients: ings });
+  assert.ok(!cat('Bolognese', ['1 lb ground meat']).tags.includes('vegetarian'));
+  assert.deepEqual(cat('Roast Pork', ['1 pork tenderloin']).proteins, ['pork']);
+  assert.deepEqual(cat('Cauliflower Steaks', ['1 head cauliflower, cut into steaks']).proteins, []);
+  assert.deepEqual(cat('Chicken Larb', ['1 lb chicken mince']).proteins, ['chicken']);
+  assert.deepEqual(cat('Crab Cakes', ['1 lb crab meat']).mealTypes, ['dinner']);
+  assert.ok(!cat('Dinner Rolls', ['3 cups flour']).mealTypes.includes('dinner'));
+  assert.deepEqual(categorizeR({ title: 'X', ingredients: [null, { raw: '1 lb beef' }] }).proteins, ['beef']);
+});
+
+test('review fixes: pantry, filters, planning', () => {
+  assert.ok(isPantryItem('egg', ['eggs']));
+  assert.ok(!isPantryItem('red bell pepper', ['pepper']));
+  assert.ok(!isPantryItem('peanut butter', ['butter']));
+  assert.equal(fmtR(0.03), '0.03');
+  const r = (id, ing) => ({ id, title: id, mealTypes: ['dinner'], ingredients: parseIngredients(ing) });
+  assert.ok(mf(r('a', ['1 cup graham crackers']), { excludeIngredients: 'ham' }));
+  assert.ok(mf(r('b', ['1 eggplant']), { excludeIngredients: 'egg' }));
+  assert.ok(!mf(r('c', ['1 mushroom']), { excludeIngredients: 'mushrooms' }));
+  assert.ok(mf({ id: 'x', title: 'X' }, { mealTypes: ['dinner'] }));
+  const three = [r('a', ['1 cup rice']), r('b', ['1 cup rice']), r('c', ['1 cup rice'])];
+  const dates = dr('2026-10-01', '2026-10-10');
+  for (let k = 0; k < 100; k++) {
+    const { days } = gp(three, {}, dates, [], { meals: ['dinner'] });
+    for (let i = 1; i < days.length; i++) assert.notEqual(days[i].slots.dinner.recipeId, days[i - 1].slots.dinner.recipeId);
+  }
+  const first = gp(three, {}, dates, [], { meals: ['dinner'] }).days;
+  first[0].slots.dinner.servings = 7;
+  assert.equal(gp(three, {}, dates, first, { meals: ['dinner'] }).days[0].slots.dinner.servings, 7);
+});

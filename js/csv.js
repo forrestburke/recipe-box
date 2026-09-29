@@ -40,6 +40,15 @@ const COLUMNS = {
   image: ['image url', 'image_url', 'image', 'photo', 'picture'],
 };
 
+// "90", "1 hr 30 min", "1h30", "45 minutes" -> minutes
+function parseMinutes(v) {
+  const s = String(v || '').toLowerCase();
+  const h = s.match(/(\d+(?:[.,]\d+)?)\s*(h|hr|hrs|hour|hours)\b/);
+  const m = s.match(/(\d+)\s*(m|min|mins|minute|minutes)\b/);
+  if (h || m) return Math.round((h ? parseFloat(h[1].replace(',', '.')) * 60 : 0) + (m ? +m[1] : 0)) || null;
+  return parseInt(s, 10) || null;
+}
+
 const list = (v) => String(v || '').split(/\s*[,;]\s*/).map(s => s.trim().toLowerCase()).filter(Boolean);
 // One per line; a single line can also use " | " as the separator
 const lines = (v) => {
@@ -72,7 +81,7 @@ export function recipesFromCsv(text) {
     const d = {
       title,
       servings: parseInt(get(row, 'servings'), 10) || null,
-      totalTime: parseInt(get(row, 'totalTime'), 10) || null,
+      totalTime: parseMinutes(get(row, 'totalTime')),
       ingredients: lines(get(row, 'ingredients')),
       steps: lines(get(row, 'steps')),
       notes: get(row, 'notes').trim(),

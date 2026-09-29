@@ -1,11 +1,12 @@
 // Merge the planned recipes' ingredients into one grocery list.
-import { UNIT_FAMILIES, unitFamily } from './parser.js';
+import { UNIT_FAMILIES, unitFamily, normalizeName } from './parser.js';
 import { aisleFor, AISLE_ORDER } from './categorize.js';
 
 const NICE_FRACTIONS = [[0, ''], [0.125, '⅛'], [0.25, '¼'], [0.333, '⅓'], [0.5, '½'], [0.667, '⅔'], [0.75, '¾'], [1, '']];
 
 export function formatQty(n) {
   if (n == null || isNaN(n)) return '';
+  if (n > 0 && n < 0.1) return String(Math.round(n * 100) / 100 || 0.01); // tiny amounts never show as "0"
   if (n >= 10) return String(Math.round(n));
   const whole = Math.floor(n);
   const frac = n - whole;
@@ -16,10 +17,10 @@ export function formatQty(n) {
   return (w ? String(w) : '') + best[1] || '0';
 }
 
-const PLURAL_UNITS = new Set(['cup', 'clove', 'can', 'package', 'jar', 'bottle', 'slice', 'bunch', 'stick', 'head', 'sprig', 'stalk', 'handful', 'piece', 'fillet', 'quart', 'pint', 'gallon']);
+const PLURAL_UNITS = new Set(['cup', 'clove', 'can', 'package', 'jar', 'bottle', 'slice', 'bunch', 'stick', 'head', 'sprig', 'stalk', 'handful', 'piece', 'fillet', 'quart', 'pint', 'gallon', 'pinch', 'dash']);
 export function unitLabel(unit, qty) {
   if (!unit) return '';
-  if (PLURAL_UNITS.has(unit) && qty > 1) return unit === 'bunch' ? 'bunches' : unit === 'pinch' ? 'pinches' : unit + 's';
+  if (PLURAL_UNITS.has(unit) && qty > 1) return ['bunch', 'pinch', 'dash'].includes(unit) ? unit + 'es' : unit + 's';
   return unit;
 }
 
@@ -50,10 +51,13 @@ function combineAmounts(entries) {
 }
 
 export function isPantryItem(key, pantry) {
-  return pantry.some(p => {
-    const t = p.trim().toLowerCase();
-    return t && (key === t || key.endsWith(' ' + t) || key === t + 's');
-  });
+  return (pantry || []).some(p => pantryMatches(key, p));
+}
+export function pantryMatches(key, entry) {
+  const t = normalizeName(String(entry || ''));
+  if (!t || !key) return false;
+  if (key === t) return true;
+  return t.includes(' ') && key.endsWith(' ' + t); // "olive oil" covers "extra virgin olive oil"
 }
 
 // One ingredient line at a different serving size, e.g. "1½ cups flour" x2 -> "3 cups flour"
@@ -77,9 +81,10 @@ export function buildShoppingList(plan, recipesById, pantry = [], state = {}) {
       const r = recipesById.get(slot.recipeId);
       if (!r) continue;
       const servings = slot.servings || plan.people;
-      const factor = r.servings && servings ? servings / r.servings : 1;
+      const base = parseFloat(r.servings);
+      const factor = base > 0 && servings ? servings / base : 1;
       for (const ing of r.ingredients || []) {
-        if (!ing.key) continue;
+        if (!ing?.key) continue;
         let it = items.get(ing.key);
         if (!it) items.set(ing.key, (it = { key: ing.key, name: titleCase(ing.display || ing.key), entries: [], recipes: new Set(), aisle: aisleFor(ing.key) }));
         it.entries.push(factor === 1 ? ing : { ...ing, qty: ing.qty != null ? ing.qty * factor : null, qtyMax: ing.qtyMax != null ? ing.qtyMax * factor : null });

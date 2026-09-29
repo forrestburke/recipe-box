@@ -6,7 +6,7 @@ import { importFromUrl, importFromFile, importFromText, splitPastedRecipes, isPd
 import { createBulk } from './bulk.js';
 import { recipesFromCsv, csvTemplate } from './csv.js';
 import { dateRange, formatDay, generatePlan, matchesFilters, pickOne, normalizePlan, MEAL_SLOTS } from './planner.js';
-import { buildShoppingList, groupByAisle, listToText, listToCsv } from './shopping.js';
+import { buildShoppingList, groupByAisle, listToText, listToCsv, isPantryItem, pantryMatches } from './shopping.js';
 import { formatQty, unitLabel, scaleIngredientText } from './shopping.js';
 import { SAMPLE_RECIPES } from './samples.js';
 import { findDishImages, photoToDataUrl, CONFIDENT } from './images.js';
@@ -15,6 +15,8 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const safeUrl = u => (/^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '');
+const safeImg = u => (/^(https?:\/\/|data:image\/)/i.test(String(u || '').trim()) ? String(u).trim() : '');
 
 const TAG_OPTIONS = ['vegetarian', 'vegan', 'quick', 'contains dairy', 'contains gluten', 'contains nuts', 'spicy', 'soup', 'salad', 'pasta', 'slow cooker', 'instant pot', 'grill', 'mexican', 'italian', 'asian', 'indian'];
 const PROTEIN_EMOJI = { chicken: '🍗', beef: '🥩', pork: '🥓', lamb: '🍖', turkey: '🦃', duck: '🦆', fish: '🐟', shellfish: '🦐', tofu: '🧈', legumes: '🫘', eggs: '🥚' };
@@ -86,7 +88,10 @@ function chipsHtml(r, { tags = true } = {}) {
 }
 
 // ---------------- Navigation ----------------
+const VIEWS = ['library', 'add', 'plan', 'shop', 'settings'];
 let view = 'library';
+// true while the user is typing in a field inside the given section
+const typingIn = (sel) => { const a = document.activeElement; return !!a && a.matches('input, textarea, select') && !!a.closest(sel); };
 function show(v) {
   view = v;
   $$('.view').forEach(el => el.hidden = el.id !== 'view-' + v);
@@ -96,6 +101,8 @@ function show(v) {
   window.scrollTo(0, 0);
 }
 function render() {
+  if (view === 'settings' && typingIn('#view-settings')) return; // don't wipe half-typed text
+  if (view === 'plan' && typingIn('#plan-filters')) return;
   if (view === 'library') renderLibrary();
   if (view === 'plan') renderPlan();
   if (view === 'shop') renderShop();
@@ -133,7 +140,7 @@ function renderLibrary() {
   $('#view-library .toolbar').classList.toggle('with-kitchen', !kSel.hidden);
   const list = all.filter(r => {
     if (kVal && (r.kitchen || store.currentKitchen()) !== kVal) return false;
-    if (meal === '__review') { if (!r.needsReview) return false; }
+    if (meal === '__review') { if (!r.needsReview || !store.isMine(r)) return false; }
     else if (meal && !r.mealTypes?.includes(meal)) return false;
     if (protein === '__none' && r.proteins?.length) return false;
     if (protein && protein !== '__none' && !r.proteins?.includes(protein)) return false;
@@ -150,7 +157,7 @@ function renderLibrary() {
   }
   if (!list.length) { $('#lib-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">No recipes match.</div>'; return; }
   $('#lib-grid').innerHTML = list.map(r => `
-    <button class="card recipe-card" data-recipe="${r.id}">
+    <button class="card recipe-card" data-recipe="${esc(r.id)}">
       ${thumbHtml(r)}
       <div class="body">
         <h3>${esc(r.title)}</h3>
@@ -184,7 +191,7 @@ function openRecipe(id, servings) {
   const lines = uniqueLines((r.ingredients || []).map(i => ({ raw: scaleIngredientText(i, factor) })));
   const dlg = $('#recipe-dialog');
   dlg.innerHTML = `
-    ${r.image ? `<div class="dlg-hero"><img src="${esc(r.image)}" alt="${esc(r.title)}" onerror="this.parentElement.remove()">${r.imageCredit ? `<a class="credit" href="${esc(r.imagePage || r.image)}" target="_blank" rel="noopener">Photo: ${esc(r.imageCredit)}</a>` : ''}</div>` : ''}
+    ${r.image ? `<div class="dlg-hero"><img src="${esc(r.image)}" alt="${esc(r.title)}" onerror="this.parentElement.remove()">${r.imageCredit && safeUrl(r.imagePage || r.image) ? `<a class="credit" href="${esc(safeUrl(r.imagePage || r.image))}" target="_blank" rel="noopener">Photo: ${esc(r.imageCredit)}</a>` : ''}</div>` : ''}
     <div class="dlg-body">
       <h1>${esc(r.title)}</h1>
       <div class="chips">${kitchenBadge(r)}${chipsHtml(r)}${(r.tags || []).filter(t => t.startsWith('contains')).map(t => `<span class="chip tag">${esc(t)}</span>`).join('')}</div>
@@ -194,7 +201,7 @@ function openRecipe(id, servings) {
           <span><strong>${serves}</strong> serving${serves === 1 ? '' : 's'}${factor !== 1 ? ` <span class="muted">(recipe makes ${r.servings})</span>` : ''}</span>
           <button class="btn icon small" data-serve="1" aria-label="More servings">+</button>
         </div>` : mine ? '<span class="muted">Add "Serves" in Edit to scale this recipe</span>' : ''}
-        <span class="muted">${[r.totalTime && r.totalTime + ' min', r.sourceUrl && `<a href="${esc(r.sourceUrl)}" target="_blank" rel="noopener">Original recipe ↗</a>`].filter(Boolean).join(' · ')}</span>
+        <span class="muted">${[r.totalTime && r.totalTime + ' min', safeUrl(r.sourceUrl) && `<a href="${esc(safeUrl(r.sourceUrl))}" target="_blank" rel="noopener">Original recipe ↗</a>`].filter(Boolean).join(' · ')}</span>
       </div>
       <div class="dlg-cols">
         <div><h2>Ingredients</h2><ul>${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul></div>
@@ -216,13 +223,17 @@ function openRecipe(id, servings) {
     if (act === 'close') dlg.close();
     if (act === 'edit') { dlg.close(); show('add'); startReview([{ ...r, _existing: true }]); }
     if (act === 'copy') {
-      const copy = store.copyRecipe(r.id);
-      toast(`Copied "${r.title}" to your kitchen`);
-      render();
-      openRecipe(copy.id);
+      try {
+        const copy = store.copyRecipe(r.id);
+        toast(`Copied "${r.title}" to your kitchen`);
+        render();
+        openRecipe(copy.id);
+      } catch (err) { alert(err.message); }
     }
-    if (act === 'print') printHtml(`<h1>${esc(r.title)}</h1>${serves ? `<p>Serves ${serves}</p>` : ''}<h2>Ingredients</h2>${lines.map(l => `<div class="p-item">${esc(l)}</div>`).join('')}<h2>Method</h2><ol>${(r.steps || []).map(s => `<li>${esc(s)}</li>`).join('')}</ol>`);
-    if (act === 'delete' && confirm(`Delete "${r.title}"?`)) { store.deleteRecipe(r.id); dlg.close(); toast('Recipe deleted'); render(); }
+    if (act === 'print') printHtml(`<h1>${esc(r.title)}</h1>${r.servings && serves ? `<p>Serves ${serves}</p>` : ''}<h2>Ingredients</h2>${lines.map(l => `<div class="p-item">${esc(l)}</div>`).join('')}<h2>Method</h2><ol>${(r.steps || []).map(s => `<li>${esc(s)}</li>`).join('')}</ol>`);
+    if (act === 'delete' && confirm(`Delete "${r.title}"?`)) {
+      try { store.deleteRecipe(r.id); dlg.close(); toast('Recipe deleted'); render(); } catch (err) { alert(err.message); }
+    }
   };
   if (!dlg.open) dlg.showModal();
 }
@@ -270,7 +281,7 @@ function initAdd() {
 
   // Bulk: a whole binder as one PDF / many photos, or a spreadsheet
   const bulkInput = $('#bulk-files');
-  bulkInput.addEventListener('change', () => { const f = [...bulkInput.files]; bulkInput.value = ''; if (f.length) { bulk.startFiles(f); showBulk(); } });
+  bulkInput.addEventListener('change', () => { const f = [...bulkInput.files]; bulkInput.value = ''; if (f.length) startBulkFiles(f); });
   const csvInput = $('#csv-file');
   csvInput.addEventListener('change', async () => {
     const f = csvInput.files[0];
@@ -300,7 +311,7 @@ function initAdd() {
     + `var f=function(d){if(!d||typeof d!='object')return null;if(Array.isArray(d)){for(var i=0;i<d.length;i++){var x=f(d[i]);if(x)return x}return null}var t=[].concat(d['@type']||[]);for(var j=0;j<t.length;j++)if(String(t[j]).toLowerCase()=='recipe')return d;return f(d['@graph'])||f(d.mainEntity)};`
     + `var r=null,s=document.querySelectorAll('script[type="application/ld+json"]');for(var k=0;k<s.length&&!r;k++){try{r=f(JSON.parse(s[k].textContent))}catch(e){}}`
     + `var p={u:location.href,n:document.title};`
-    + `if(r){var keep=['name','image','recipeIngredient','ingredients','recipeInstructions','recipeYield','totalTime','prepTime','cookTime','recipeCategory','recipeCuisine','keywords'],o={'@type':'Recipe'};keep.forEach(function(q){if(r[q]!=null)o[q]=r[q]});p.r=o}`
+    + `if(r&&!(r.recipeIngredient||r.ingredients||[]).length)r=null;if(r){var keep=['name','image','recipeIngredient','ingredients','recipeInstructions','recipeYield','totalTime','prepTime','cookTime','recipeCategory','recipeCuisine','keywords'],o={'@type':'Recipe'};keep.forEach(function(q){if(r[q]!=null)o[q]=r[q]});p.r=o}`
     + `else p.t=document.body.innerText.slice(0,20000);`
     + `done(p)};`;
   // New tab when allowed; if the browser blocks it (e.g. Chrome on iPhone), open the app in this tab instead.
@@ -338,20 +349,29 @@ function handleImportHash() {
   if (payload.r) {
     const html = `<script type="application/ld+json">${JSON.stringify(payload.r).replace(/</g, '\\u003c')}</script>`;
     draft = extractRecipeFromHtml(html, payload.u);
+    if (!draft.ingredients?.length && payload.t) draft = { ...importFromText(payload.t), sourceUrl: payload.u };
   } else {
     draft = importFromText(payload.t || '');
     if (payload.n) draft.title = payload.n.split(/\s[|–-]\s/)[0];
     draft.sourceUrl = payload.u;
   }
-  draft.source = { type: 'url', url: payload.u };
+  draft.sourceUrl = safeUrl(draft.sourceUrl || payload.u);
+  draft.source = { type: 'url', url: safeUrl(payload.u) };
   show('add');
   startReview([draft]);
   return true;
 }
 
+async function startBulkFiles(files) {
+  showBulk();
+  const ok = await bulk.startFiles(files);
+  if (!ok) { $('#bulk').hidden = true; $('#add-sources').hidden = false; }
+}
+
 async function handleFiles(files) {
   if (!files.length) return;
-  if (files.length > 1 || files.some(isPdf)) { bulk.startFiles(files); showBulk(); return; }
+  const scans = files.filter(f => isPdf(f) || f.type.startsWith('image/'));
+  if (scans.length && (scans.length > 1 || scans.some(isPdf))) { startBulkFiles(scans); files = files.filter(f => !scans.includes(f)); if (!files.length) return; }
   const drafts = [];
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
@@ -497,7 +517,7 @@ function initIngredientEditor(box) {
   // Enter in a row adds a new row below
   box.addEventListener('keydown', e => {
     const rowEl = e.target.closest('.ing-row');
-    if (e.key !== 'Enter' || !rowEl) return;
+    if (e.key !== 'Enter' || !rowEl || e.target.tagName === 'BUTTON') return;
     e.preventDefault();
     const i = +rowEl.dataset.i + 1;
     ingRows.splice(i, 0, { raw: '', qty: null, unit: null, name: '', key: '', display: '', note: '', dirty: true });
@@ -573,7 +593,7 @@ function renderReview() {
   const sources = $('#add-sources');
   if (reviewIndex >= reviewQueue.length) {
     box.hidden = true; box.innerHTML = '';
-    if (bulk.isActive()) showBulk(); else sources.hidden = false;
+    if (bulk.isActive()) { showBulk(); bulk.resume(); } else sources.hidden = false;
     reviewDone = null;
     return;
   }
@@ -691,7 +711,12 @@ function renderReview() {
     if (chip) chip.setAttribute('aria-pressed', chip.getAttribute('aria-pressed') !== 'true');
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
-    if (act === 'cancel') { reviewIndex++; renderReview(); }
+    if (act === 'cancel') {
+      reviewIndex++;
+      renderReview();
+      // Cancelling an edit of a saved recipe goes back to that recipe
+      if (s.existing && reviewIndex >= reviewQueue.length) { show('library'); openRecipe(s.id); }
+    }
     if (act === 'find-photos') findPhotos();
     if (act === 'remove-photo') { setPhoto(''); s.imageTried = true; $('#photo-url').value = ''; }
     if (act === 'save') saveReview(s);
@@ -748,7 +773,9 @@ function saveReview(s) {
     source: s.source || { type: 'manual' },
   };
   if (!recipe.mealTypes.length) recipe.mealTypes = ['dinner'];
-  const saved = store.saveRecipe(recipe);
+  let saved;
+  try { saved = store.saveRecipe(recipe); }
+  catch (err) { alert(err.message); return; }
   toast(`Saved "${title}"`);
   if (!saved.image && !saved.imageTried) autoImage(saved.id); // look up a dish photo in the background
   reviewIndex++;
@@ -774,7 +801,9 @@ function getPlan() {
 // The plan plus the meals / people settings it's viewed with
 function planForList() {
   const st = store.settings();
-  return { ...getPlan(), meals: st.planMeals?.length ? st.planMeals : ['dinner'], people: st.people || null };
+  const plan = getPlan();
+  const inRange = new Set(dateRange(plan.start, plan.end));
+  return { ...plan, days: plan.days.filter(d => inRange.has(d.date)), meals: st.planMeals?.length ? st.planMeals : ['dinner'], people: st.people || null };
 }
 
 const SLOT_LABEL = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
@@ -845,9 +874,9 @@ function renderPlan() {
       ${meals.length > 1 ? `<div class="slot-label">${SLOT_LABEL[meal]}</div>` : ''}
       <div class="slot-main">
         ${s.skip ? `<span class="muted">No cooking — eating out / leftovers</span>`
-          : r ? `<div class="day-meal"><button class="day-thumb-btn" data-open="${r.id}" data-serves="${serves}" aria-label="Open ${esc(r.title)}">${thumbHtml(r, 'day-thumb')}</button><div><button class="title" data-open="${r.id}" data-serves="${serves}">${esc(r.title)}</button><div class="chips" style="margin-top:4px">${kitchenBadge(r)}${chipsHtml(r, { tags: false })}</div></div></div>`
+          : r ? `<div class="day-meal"><button class="day-thumb-btn" data-open="${esc(r.id)}" data-serves="${serves}" aria-label="Open ${esc(r.title)}">${thumbHtml(r, 'day-thumb')}</button><div><button class="title" data-open="${r.id}" data-serves="${serves}">${esc(r.title)}</button><div class="chips" style="margin-top:4px">${kitchenBadge(r)}${chipsHtml(r, { tags: false })}</div></div></div>`
           : '<span class="muted">Nothing planned</span>'}
-        ${s.skip ? '' : `<select data-choose aria-label="Choose ${meal} recipe"><option value="">${r ? 'Pick a different recipe…' : 'Choose a recipe…'}</option>${options.map(o => `<option value="${o.id}">${esc(o.title)}${fits.includes(o) ? '' : ' (outside filters)'}</option>`).join('')}</select>`}
+        ${s.skip ? '' : `<select data-choose aria-label="Choose ${meal} recipe"><option value="">${r ? 'Pick a different recipe…' : 'Choose a recipe…'}</option>${options.map(o => `<option value="${esc(o.id)}">${esc(o.title)}${fits.includes(o) ? '' : ' (outside filters)'}</option>`).join('')}</select>`}
       </div>
       <div class="slot-side">
         ${r && !s.skip ? `<div class="stepper small" title="${r.servings ? `Recipe makes ${r.servings}` : 'Add a serving size to this recipe to scale it'}">
@@ -912,7 +941,7 @@ function initPlan() {
       plan[e.target.id === 'plan-start' ? 'start' : 'end'] = e.target.value;
       if (plan.start > plan.end && e.target.id === 'plan-start') plan.end = plan.start;
       const valid = new Set(dateRange(plan.start, plan.end));
-      plan.days = plan.days.filter(d => valid.has(d.date));
+      // days outside the range are kept (hidden) so a mistyped date doesn't wipe the plan
       store.set('plan', plan);
       renderPlan();
     }
@@ -961,9 +990,17 @@ function updateSlot(date, meal, fn) {
 // ---------------- Shopping list ----------------
 let showHave = false;
 
+// "Have it" ticks and added items for the current plan (a new plan starts with a clean list)
+function shoppingForPlan() {
+  const s = store.get('shopping') || { overrides: {}, custom: [] };
+  const start = getPlan().start;
+  if (s.forStart && s.forStart !== start) return { overrides: {}, custom: [], forStart: start };
+  return { overrides: {}, custom: [], ...s };
+}
+
 function currentList() {
   const st = store.settings();
-  return buildShoppingList(planForList(), store.recipeMap(), st.pantry, store.get('shopping'));
+  return buildShoppingList(planForList(), store.recipeMap(), st.pantry, shoppingForPlan());
 }
 
 function renderShop() {
@@ -983,7 +1020,7 @@ function renderShop() {
       <input type="checkbox" ${i.have ? 'checked' : ''} aria-label="Have ${esc(i.name)}" title="I already have this">
       <div><div class="name">${esc(i.name)}</div>${i.recipes.length ? `<div class="for">${esc(i.recipes.join(', '))}</div>` : ''}</div>
       <div class="amt" title="${esc(i.raw.join('\n'))}">${esc(i.amount)}</div>
-      ${i.custom ? `<button class="star" data-remove title="Remove">✕</button>` : `<button class="star ${pantry.includes(i.key) ? 'on' : ''}" data-star title="${pantry.includes(i.key) ? 'Remove from' : 'Add to'} always-have pantry">⭐</button>`}
+      ${i.custom ? `<button class="star" data-remove title="Remove">✕</button>` : `<button class="star ${isPantryItem(i.key, pantry) ? 'on' : ''}" data-star title="${pantry.includes(i.key) ? 'Remove from' : 'Add to'} always-have pantry">⭐</button>`}
     </div>`;
   const section = items => [...groupByAisle(items)].map(([aisle, its]) => `<div class="aisle"><h2>${esc(aisle)}</h2><div class="items">${its.map(itemHtml).join('')}</div></div>`).join('');
 
@@ -992,7 +1029,7 @@ function renderShop() {
 }
 
 function initShop() {
-  const shopState = () => structuredClone(store.get('shopping') || { overrides: {}, custom: [] });
+  const shopState = () => ({ ...structuredClone(shoppingForPlan()), forStart: getPlan().start });
   $('#shop-list').addEventListener('change', e => {
     if (e.target.type !== 'checkbox') return;
     const key = e.target.closest('[data-key]').dataset.key;
@@ -1016,8 +1053,9 @@ function initShop() {
     }
     if (e.target.closest('[data-star]')) {
       const pantry = store.settings().pantry.slice();
-      const i = pantry.findIndex(p => p.toLowerCase() === key);
-      if (i === -1) { pantry.push(key); toast(`"${key}" will always be ticked`); } else { pantry.splice(i, 1); toast(`Removed "${key}" from pantry`); }
+      const matching = pantry.filter(p => pantryMatches(key, p));
+      if (!matching.length) { pantry.push(key); toast(`"${key}" will always be ticked`); }
+      else { matching.forEach(m => pantry.splice(pantry.indexOf(m), 1)); toast(`Removed "${matching.join('", "')}" from pantry`); }
       const s = shopState(); delete s.overrides[key]; store.set('shopping', s);
       store.updateSettings({ pantry });
       renderShop();
@@ -1076,7 +1114,7 @@ function renderSettings() {
       ${c.myKitchens.length > 1 ? `<label class="field" style="margin-top:8px">Switch kitchen
         <select id="kitchen-switch-settings">${c.myKitchens.map(k => `<option value="${esc(k.id)}" ${k.id === c.kitchenId ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select></label>` : ''}
       <p class="muted small">These people share this kitchen's <strong>meal plan, shopping list and pantry</strong>:</p>
-      ${memberList(c.members, c.email, 'data-remove-member')}
+      ${memberList(c.members, c.email, 'data-remove-member', () => c.isOwner)}
       <form id="invite-form" class="row" style="margin-top:8px">
         <input id="invite-email" type="email" placeholder="their Google email" aria-label="Email to share this kitchen with" required>
         <button class="btn">Add to kitchen</button>
@@ -1085,7 +1123,7 @@ function renderSettings() {
       <h3 class="sub">Family recipe sharing</h3>
       <p class="muted small">Family members get <strong>their own kitchen</strong> (their own plan and list) but everyone sees everyone's recipes. You can only edit your own kitchen's recipes.</p>
       ${otherKitchens.length ? `<p class="small">Kitchens sharing recipes with you: ${otherKitchens.map(k => `<span class="chip kitchen">🏠 ${esc(k.name)}</span>`).join(' ')}</p>` : ''}
-      ${familyOnly.length ? memberList(familyOnly, c.email, 'data-remove-family') : '<p class="muted small">No one outside your kitchen yet.</p>'}
+      ${familyOnly.length ? memberList(familyOnly, c.email, 'data-remove-family', () => c.isFamilyAdmin) : '<p class="muted small">No one outside your kitchen yet.</p>'}
       <form id="family-form" class="row" style="margin-top:8px">
         <input id="family-email" type="email" placeholder="e.g. your mother-in-law's Google email" aria-label="Email to share recipes with" required>
         <button class="btn">Share recipes</button>
@@ -1108,12 +1146,12 @@ function renderAccount() {
     sw.innerHTML = c.myKitchens.map(k => `<option value="${esc(k.id)}" ${k.id === c.kitchenId ? 'selected' : ''}>🏠 ${esc(k.name)}</option>`).join('');
   }
   if (!c) return;
-  const state = c.error ? 'error' : c.loading ? 'loading' : c.signedIn ? 'on' : 'off';
+  const state = c.error ? 'error' : c.offline ? 'offline' : c.loading ? 'loading' : c.signedIn ? 'on' : 'off';
   const first = (c.name || c.email || '?').trim().charAt(0).toUpperCase();
   const avatar = c.signedIn
     ? `<span class="avatar">${c.photo ? `<img src="${esc(c.photo)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}${esc(first)}</span>`
     : '';
-  const label = { on: 'Synced', off: 'Sign in', loading: 'Connecting…', error: 'Sync issue' }[state];
+  const label = { on: 'Synced', off: 'Sign in', loading: 'Connecting…', error: 'Sync issue', offline: 'Offline' }[state];
   chip.className = `account-chip ${state}`;
   chip.title = c.signedIn
     ? `Signed in as ${c.email} — ${c.kitchenName}${c.members?.length > 1 ? `, shared with ${c.members.filter(m => m !== c.email).join(', ')}` : ''}`
@@ -1208,17 +1246,17 @@ store.init();
 store.onChange(ch => {
   renderAccount();
   if (ch.cloud || ch.all) render();
-  if (ch.cloud && !ch.all && view === 'settings') renderSettings();
+  if (ch.cloud && !ch.all && view === 'settings' && !typingIn('#view-settings')) renderSettings();
 });
 setTimeout(() => fillMissingImages(), 1500); // quietly find photos for recipes saved before this feature
 initLibrary(); initAdd(); initPlan(); initShop(); initSettings();
 renderAccount();
 if (!handleImportHash()) {
   const start = location.hash.slice(1);
-  show(['library', 'add', 'plan', 'shop', 'settings'].includes(start) ? start : 'library');
+  show(VIEWS.includes(start) ? start : 'library');
 }
 window.addEventListener('hashchange', () => {
   if (handleImportHash()) return;
   const v = location.hash.slice(1);
-  if (v && v !== view) show(v);
+  if (v && v !== view && VIEWS.includes(v)) show(v);
 });

@@ -13,7 +13,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 // Not enough to be a recipe on its own: probably the back half of the previous page's recipe
 export function looksLikeContinuation(text) {
   const t = String(text || '');
-  if (/\bingredients?\b/i.test(t)) return false;
+  if (/^\s*ingredients?\s*:?\s*$/im.test(t)) return false; // has its own "Ingredients" heading
   return parseRecipeText(t).ingredients.length < 2;
 }
 export const isBlankPage = (text) => String(text || '').replace(/\s/g, '').length < 15;
@@ -26,6 +26,7 @@ export function isWeak(d, title) {
 export function createBulk({ root, store, toast, onReview, onFinish }) {
   let st = null;
   let renderTimer = null;
+  let suspended = false; // true while one of its recipes is open in the review editor
 
   // ---------- building the list ----------
   function items() {
@@ -70,12 +71,13 @@ export function createBulk({ root, store, toast, onReview, onFinish }) {
     const pct = Math.round(100 * st.processed / st.pages.length);
     return `<div class="bar"><span style="width:${pct}%"></span></div>
       <p class="muted small">${reading
-        ? `Reading page ${Math.min(st.processed + 1, st.pages.length)} of ${st.pages.length} (${ocrWorkerCount()} at a time). Keep this tab open; you can check titles as they appear.`
+        ? `Reading page ${Math.min(st.processed + 1, st.pages.length)} of ${st.pages.length} (${ocrWorkerCount()} at a time). Keep this page on screen (reading pauses if you switch apps or tabs); you can check titles as they appear.`
         : `Read ${st.pages.length} page${st.pages.length === 1 ? '' : 's'} → ${all.filter(it => it.pages).length} recipe${all.filter(it => it.pages).length === 1 ? '' : 's'}${st.skipped.size ? ` (${st.skipped.size} blank page${st.skipped.size === 1 ? '' : 's'} skipped)` : ''}.`}</p>`;
   }
 
   function render() {
     if (!st) { root.hidden = true; root.innerHTML = ''; return; }
+    if (suspended) return;
     const all = items();
     // Don't rebuild the list under someone typing a title; just update the progress bar
     const typing = root.contains(document.activeElement) && document.activeElement.dataset.bulk === 'title';
@@ -94,7 +96,7 @@ export function createBulk({ root, store, toast, onReview, onFinish }) {
       </div>
       <div class="bulk-progress" data-progress>${progressHtml(all)}</div>
       <p class="method-note">Check the titles, untick anything that isn't a recipe, then <strong>Save</strong>. Recipes marked <strong>⚠ check</strong> look incomplete. They're saved with a "needs review" flag so you can fix them later (Recipes → "Needs review"), or use <strong>Review</strong> to fix one now.${st.pages.length > 1 ? ' Pages that continue a recipe are joined automatically; use <strong>⤴ Join with previous</strong> or <strong>✂</strong> to fix.' : ''}</p>
-      ${st.pages.length ? `<p class="muted small">Keep this tab open until you've saved. Scanned pictures aren't kept after saving (only the text), and a page holding two recipes comes in as one, so split it with <strong>Review</strong>. Handwritten pages usually need fixing by hand.</p>` : ''}
+      ${st.pages.length ? `<p class="muted small">Keep this page open until you've saved. Scanned pictures aren't kept after saving (only the text), and a page holding two recipes comes in as one, so split it with <strong>Review</strong>. Handwritten pages usually need fixing by hand.</p>` : ''}
       <div class="bulk-list">${all.length ? all.map((it, n) => itemHtml(it, n, all[n - 1])).join('') : '<p class="muted">Nothing to import.</p>'}</div>`;
   }
 
@@ -149,7 +151,9 @@ export function createBulk({ root, store, toast, onReview, onFinish }) {
     if (act === 'review' && item) {
       const d = { ...draftFor(item), title: titleFor(item, draftFor(item)) };
       if (item.pages) d.scanImages = await Promise.all(item.pages.map(i => st.pages[i].bigImage?.() || st.pages[i].thumb));
-      onReview(d, (saved) => { st.saved.set(key, saved.id); render(); });
+      suspended = true;
+      root.hidden = true;
+      onReview(d, (saved) => { if (st && saved) st.saved.set(key, saved.id); });
     }
     if (act === 'save-all') saveAll();
     if (act === 'cancel') {
@@ -237,14 +241,19 @@ export function createBulk({ root, store, toast, onReview, onFinish }) {
 
   return {
     isActive: () => !!st,
+    // called when the review editor closes (saved or cancelled)
+    resume() { suspended = false; render(); },
 
     // PDFs (one page each) and photos (one per photo), in the order given
     async startFiles(files) {
       begin(files.length === 1 ? files[0].name : `${files.length} files`);
+      suspended = false;
       render();
       for (const f of files) {
         if (isPdf(f)) {
-          const pdf = await openPdf(f);
+          let pdf;
+          try { pdf = await openPdf(f); }
+          catch (err) { console.error(err); toast(`Couldn't open ${f.name}. Is it password-protected or damaged?`); continue; }
           for (let n = 1; n <= pdf.numPages; n++) {
             st.pages.push({ status: 'queued', preview: () => pdfPageImage(pdf, n, 180), bigImage: () => pdfPageImage(pdf, n, 900), read: () => pdfPageText(pdf, n) });
           }
@@ -252,9 +261,10 @@ export function createBulk({ root, store, toast, onReview, onFinish }) {
           st.pages.push({ status: 'queued', preview: () => imagePreview(f, 180), bigImage: () => imagePreview(f, 900), read: () => imageText(f) });
         }
       }
-      if (!st.pages.length) { toast('No PDFs or photos in that selection'); st = null; render(); return; }
+      if (!st.pages.length) { toast('No readable PDFs or photos in that selection'); st = null; render(); onFinish(0); return false; }
       render();
       readAll();
+      return true;
     },
 
     // Already-structured drafts (CSV rows, pasted recipes)

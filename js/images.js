@@ -12,7 +12,7 @@ const FILLER = new Set([
 // Auto-assign only when at least half the dish words match
 export const CONFIDENT = 0.5;
 
-const words = s => s.toLowerCase().replace(/[^a-z\s']/g, ' ').split(/\s+/).filter(w => w.length > 1 && !FILLER.has(w));
+const words = s => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z\s']/g, ' ').split(/\s+/).filter(w => w.length > 1 && !FILLER.has(w));
 
 export function dishQuery(title) {
   return words(title || '').join(' ');

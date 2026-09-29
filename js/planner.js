@@ -41,17 +41,24 @@ function splitTerms(s) {
 // filters: { mealTypes, excludeProteins, excludeTags, requireTags, excludeIngredients: 'mushroom, cilantro', kitchens: [ids] }
 export function matchesFilters(recipe, filters) {
   const f = filters || {};
-  if (f.mealTypes?.length && !recipe.mealTypes?.some(m => f.mealTypes.includes(m))) return false;
+  const types = recipe.mealTypes?.length ? recipe.mealTypes : ['dinner'];
+  if (f.mealTypes?.length && !types.some(m => f.mealTypes.includes(m))) return false;
   if (f.kitchens?.length && !f.kitchens.includes(recipe.kitchen || 'local')) return false;
   if (f.excludeProteins?.length && recipe.proteins?.some(p => f.excludeProteins.includes(p))) return false;
   if (f.excludeTags?.length && recipe.tags?.some(t => f.excludeTags.includes(t))) return false;
   if (f.requireTags?.length && !f.requireTags.every(t => recipe.tags?.includes(t))) return false;
   const bad = splitTerms(f.excludeIngredients);
   if (bad.length) {
-    const text = (recipe.ingredients || []).map(i => i.raw || i).join(' ').toLowerCase() + ' ' + (recipe.title || '').toLowerCase();
-    if (bad.some(term => text.includes(term))) return false;
+    const text = (recipe.ingredients || []).map(i => (i && (i.raw || i.key)) || String(i || '')).join(' ').toLowerCase() + ' ' + (recipe.title || '').toLowerCase();
+    if (bad.some(term => termRegex(term).test(text))) return false;
   }
   return true;
+}
+
+function termRegex(term) {
+  const stem = term.replace(/(ies)$/, 'y').replace(/(oes|ches|shes|sses|xes)$/, m => m.slice(0, -2)).replace(/([^s])s$/, '$1');
+  const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + esc + '(e?s|ies)?\\b', 'i');
 }
 
 function shuffle(arr) {
@@ -91,7 +98,12 @@ export function generatePlan(recipes, filters, dates, existingDays = [], opts = 
     for (let i = 0; i < days.length; i++) {
       const cur = days[i].slots[meal];
       if (cur?.locked || cur?.skip) continue;
-      if (!queue.length) { queue = shuffle(pool); repeated = true; }
+      const yesterday = days[i - 1]?.slots[meal]?.recipeId;
+      if (!queue.length) {
+        queue = shuffle(pool);
+        repeated = true;
+        if (queue.length > 1 && queue[0].id === yesterday) queue.push(queue.shift());
+      }
       const prevProteins = byId.get(days[i - 1]?.slots[meal]?.recipeId)?.proteins || [];
       let idx = 0;
       if (opts.avoidBackToBack && meal !== 'breakfast' && prevProteins.length) {
@@ -100,7 +112,8 @@ export function generatePlan(recipes, filters, dates, existingDays = [], opts = 
       }
       const pick = queue.splice(idx, 1)[0];
       used.add(pick.id);
-      days[i].slots[meal] = { recipeId: pick.id, locked: false, skip: false, servings: cur?.servings ?? opts.servings ?? null };
+      const oldServings = prev.get(days[i].date)?.slots?.[meal]?.servings;
+      days[i].slots[meal] = { recipeId: pick.id, locked: false, skip: false, servings: cur?.servings ?? oldServings ?? opts.servings ?? null };
     }
     if (repeated) warnings.push(`Only ${pool.length} ${meal} recipe${pool.length === 1 ? '' : 's'} match your filters, so some repeat.`);
   }

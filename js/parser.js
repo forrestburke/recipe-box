@@ -11,7 +11,8 @@ const UNICODE_FRACTIONS = {
 export function normalizeFractions(s) {
   return s
     .replace(/⁄/g, '/')
-    .replace(/(\d)?\s*([½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/g, (m, d, f) => (d ? d + ' ' : '') + UNICODE_FRACTIONS[f]);
+    // "1½" -> "1 1/2"; "sugar - ½" keeps its space -> "sugar - 1/2"
+    .replace(/(\d)?(\s*)([½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/g, (m, d, sp, f) => (d ? d + ' ' : sp) + UNICODE_FRACTIONS[f]);
 }
 
 function parseNumber(tok) {
@@ -37,6 +38,7 @@ const UNIT_TABLE = [
   ['g', ['grams', 'gram', 'gr', 'g']],
   ['ml', ['milliliters', 'millilitres', 'milliliter', 'millilitre', 'ml']],
   ['l', ['liters', 'litres', 'liter', 'litre', 'l']],
+  ['dl', ['deciliters', 'decilitres', 'deciliter', 'decilitre', 'dl']],
   ['quart', ['quarts', 'quart', 'qt']],
   ['pint', ['pints', 'pint', 'pt']],
   ['gallon', ['gallons', 'gallon', 'gal']],
@@ -77,14 +79,14 @@ export function normalizeUnit(text) {
 
 // "1 1/2", "1½", "2-3", "0.5" -> { qty, qtyMax }; blank or unreadable -> nulls
 export function parseQuantity(text) {
-  const s = normalizeFractions(String(text || '').trim());
+  const s = normalizeFractions(String(text || '').trim()).replace(/^(\d+)\s*-\s*(\d+\/\d+)$/, '$1 $2');
   const m = s.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)(?:\s*(?:-|–|to)\s*(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?))?$/);
   if (!m) return { qty: null, qtyMax: null };
   return { qty: parseNumber(m[1]), qtyMax: m[2] ? parseNumber(m[2]) : null };
 }
 
 export const UNIT_FAMILIES = {
-  volume: { tsp: 1, tbsp: 3, 'fl oz': 6, cup: 48, pint: 96, quart: 192, gallon: 768, ml: 0.2029, l: 202.9 },
+  volume: { tsp: 1, tbsp: 3, 'fl oz': 6, cup: 48, pint: 96, quart: 192, gallon: 768, ml: 0.2029, dl: 20.29, l: 202.9 },
   weight: { g: 1, kg: 1000, oz: 28.35, lb: 453.6 },
 };
 export function unitFamily(unit) {
@@ -97,7 +99,7 @@ const PREP_WORDS = [
   'chopped', 'diced', 'minced', 'sliced', 'grated', 'shredded', 'crushed', 'peeled', 'seeded', 'deseeded',
   'cubed', 'halved', 'quartered', 'trimmed', 'rinsed', 'drained', 'softened', 'melted', 'beaten', 'julienned',
   'cooked', 'uncooked', 'large', 'medium', 'small', 'extra-large', 'jumbo', 'boneless', 'skinless', 'packed',
-  'heaping', 'scant', 'level', 'about', 'approximately', 'roughly', 'ripe', 'cold', 'warm', 'hot', 'room-temperature',
+  'heaping', 'scant', 'level', 'about', 'approximately', 'roughly', 'ripe', 'room-temperature',
 ];
 const PREP_REGEX = new RegExp('\\b(' + PREP_WORDS.join('|') + ')\\b', 'gi');
 
@@ -131,7 +133,10 @@ const ALIASES = {
 export function normalizeName(name, opts = {}) {
   let n = ' ' + name.toLowerCase() + ' ';
   n = n.replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ');
-  n = n.split(/,|;|\bfor (serving|garnish|the)\b/)[0];
+  n = n.replace(/\b(hot|cold|warm|lukewarm|boiling|ice|iced)\s+(water|milk|broth|stock|coffee)\b/g, '$2');
+  const stripPrep = (t) => (opts.keepPrep ? t : t.replace(PREP_REGEX, ' ')).replace(/[^a-zà-ÿ]/g, '');
+  const segments = n.split(/\bfor (?:serving|garnish|the)\b/)[0].split(/[,;]/);
+  n = segments.find(seg => stripPrep(seg)) ?? segments[0];
   n = n.replace(/\b(to taste|optional|as needed|if needed|divided|plus more.*|or more.*|or to taste.*|at room temperature)\b/g, ' ');
   n = n.replace(/\bextra[- ]virgin\b/g, ' ');
   if (opts.keepPrep) n = n.replace(/\b(large|medium|small|about|approximately|heaping|scant)\b/g, ' ');
@@ -149,8 +154,13 @@ export function normalizeName(name, opts = {}) {
 // "1 1/2 cups (200g) all-purpose flour, sifted" -> { qty: 1.5, unit: 'cup', name: 'all-purpose flour, sifted', key: 'all-purpose flour' }
 export function parseIngredientLine(raw) {
   const original = raw.trim();
-  let s = normalizeFractions(original).replace(/^[\-•*▢□▪◦●○·✓✔]\s*/, '').trim();
+  let s = normalizeFractions(original).replace(/^[\-•*▢□▪◦●○·✓✔]\s*/, '').trim()
+    .replace(/^(\d+)\s+and\s+(\d+\/\d+)/i, '$1 $2') // "4 and 1/2 cups" -> "4 1/2 cups"
+    .replace(/^(\d+)\s*-\s*(\d+\/\d+)(?=\s)/, '$1 $2'); // "1-1/2 cups" -> "1 1/2 cups"
   let qty = null, qtyMax = null, unit = null, note = '';
+  // "juice of 2 lemons" / "zest of 1 orange" -> 2 lemons (juice)
+  const partOf = s.match(/^(juice|zest|zest and juice|juice and zest)\s+(?:of\s+)?(\d+(?:\s+\d+\/\d+)?|\d+\/\d+|a|an|one|two|three|half)\s+(.+)$/i);
+  if (partOf) { s = `${partOf[2]} ${partOf[3]}`; note = partOf[1].toLowerCase(); }
 
   const qtyMatch = s.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)(?:\s*(?:-|–|to)\s*(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?))?\s*/);
   if (qtyMatch) {
@@ -165,9 +175,14 @@ export function parseIngredientLine(raw) {
     }
   }
 
+  // "1 dozen eggs" / "a dozen eggs" -> 12 eggs
+  const dozen = s.match(/^dozen\s+/i);
+  if (dozen && qty != null) { qty *= 12; if (qtyMax != null) qtyMax *= 12; s = s.slice(dozen[0].length); }
+  else if (qty === 12 && /^dozen$/i.test((original.match(/^\s*(\w+)/) || [])[1] || '')) { /* "dozen eggs" already 12 */ }
+
   // "(14 oz)" size notes right after the quantity
   const paren = s.match(/^\(([^)]*)\)\s*/);
-  if (paren) { note = paren[1]; s = s.slice(paren[0].length); }
+  if (paren) { note = [note, paren[1]].filter(Boolean).join('; '); s = s.slice(paren[0].length); }
 
   // Single-letter T / t (tablespoon / teaspoon) are case-sensitive
   const caseUnit = s.match(/^(T|t)\.?\s+/);
@@ -190,7 +205,12 @@ export function parseIngredientLine(raw) {
   // "3 garlic cloves" -> unit clove, key garlic
   if (!unit && qty != null) {
     const tail = key.match(/\s(clove|stalk|sprig|head|bunch|fillet)$/);
-    if (tail) { unit = tail[1]; key = key.slice(0, -tail[0].length).trim(); display = key; }
+    if (tail) {
+      unit = tail[1];
+      key = key.slice(0, -tail[0].length).trim();
+      display = key;
+      name = name.replace(new RegExp('\\s+' + tail[1] + 's?\\b', 'i'), '').trim();
+    }
   }
   // bare "pepper" in small amounts is black pepper
   if (key === 'pepper' && (qty == null || ['tsp', 'tbsp', 'pinch', 'dash'].includes(unit))) key = display = 'black pepper';
@@ -202,17 +222,38 @@ export function parseIngredientLine(raw) {
 // Split combined lines like "salt and pepper to taste" into separate items
 export function parseIngredients(lines) {
   const out = [];
-  for (const line of lines) {
-    if (!line || !line.trim()) continue;
+  for (const line of lines || []) {
+    if (typeof line !== 'string' || !line.trim()) continue;
     if (/^\s*(salt\s*(and|&)\s*(black\s+)?pepper)/i.test(line) || /^\s*(kosher\s+)?salt\s*(and|&)\s*(freshly\s+)?(ground\s+)?(black\s+)?pepper/i.test(line)) {
       out.push({ raw: line, qty: null, unit: null, name: 'salt', key: 'salt', display: 'salt', note: '' });
       out.push({ raw: line, qty: null, unit: null, name: 'black pepper', key: 'black pepper', display: 'black pepper', note: '' });
       continue;
     }
+    const combined = splitCombinedIngredient(line);
+    if (combined) { out.push(...combined); continue; }
     const p = parseIngredientLine(line);
     if (p.key) out.push(p);
   }
   return out;
+}
+
+// "Cinnamon sugar - ½ C sugar and 2 T of cinnamon" -> ½ cup sugar + 2 tbsp cinnamon.
+// "Topping: 1 cup cream" -> 1 cup cream. Each part keeps the original line as `raw`,
+// so the recipe still shows it as written. Returns null when the line isn't like this.
+const STARTS_WITH_AMOUNT = /^(\d|[½⅓⅔¼¾⅛⅜⅝⅞])/;
+function splitCombinedIngredient(line) {
+  const s = normalizeFractions(line.trim()).replace(/^[\-•*▢□▪◦●○·✓✔]\s*/, '');
+  // optional label before a dash or colon, e.g. "Cinnamon sugar -", "For the glaze:"
+  const labelled = s.match(/^([A-Za-z][A-Za-z '’&]{1,40}?)\s*[-–—:]\s*(?=\d)/);
+  const rest = labelled ? s.slice(labelled[0].length) : s;
+  if (!STARTS_WITH_AMOUNT.test(rest)) return null;
+  const parts = rest.split(/\s*(?:,|;|\+|&|\band\b|\bplus\b)\s*(?=\d|[½⅓⅔¼¾⅛⅜⅝⅞])/i).map(p => p.trim()).filter(Boolean);
+  if (!labelled && parts.length < 2) return null;
+  const parsed = parts.map(parseIngredientLine);
+  // every part must be a real ingredient with an amount ("4 and 1/2 cups flour" is one ingredient)
+  if (!parsed.every(p => p.key && p.qty != null)) return null;
+  const note = labelled ? `for ${labelled[1].trim().toLowerCase().replace(/^for (the )?/, '')}` : '';
+  return parsed.map(p => ({ ...p, raw: line.trim(), note: [p.note, note].filter(Boolean).join('; ') }));
 }
 
 // ---------- Web pages ----------
@@ -257,9 +298,9 @@ function flattenInstructions(ins) {
 
 export function isoDurationToMinutes(d) {
   if (!d || typeof d !== 'string') return null;
-  const m = d.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/i);
+  const m = d.match(/P(?:([\d.]+)D)?T?(?:([\d.]+)H)?(?:([\d.]+)M)?(?:([\d.]+)S)?/i);
   if (!m) return null;
-  const mins = (+m[1] || 0) * 1440 + (+m[2] || 0) * 60 + (+m[3] || 0);
+  const mins = Math.round((+m[1] || 0) * 1440 + (+m[2] || 0) * 60 + (+m[3] || 0) + (+m[4] || 0) / 60);
   return mins || null;
 }
 
@@ -349,6 +390,7 @@ export function extractRecipeFromHtml(html, url) {
 // Fix common OCR misreads in quantities and units
 export function cleanOcrText(text) {
   return text
+    .replace(/(\d{3})[oO°](?=\s*(?:F|C|degrees|$|\b))/gm, '$1°')
     .replace(/(\d)[oO](?=\d|\b)/g, '$10')                       // 9o -> 90
     .replace(/\b[oO](?=\d)/g, '0')
     .replace(/^([lI|])(?=\s+(cups?|tbsp|tsp|tablespoons?|teaspoons?|lbs?|oz|pounds?|ounces?|cans?|large|medium|small)\b)/gim, '1') // "l cup" -> "1 cup"
