@@ -53,7 +53,12 @@ Plan any mix of **breakfast, lunch and dinner**. Set **Cooking for N people**, a
 
 ## iPhone
 
-**Add → iPhone: save recipes from Safari** walks through a one-time Shortcut (Run JavaScript on Web Page, then Open URLs). After that, **Share → Save to Recipe Box** on any recipe page imports it with no server. **Share → Add to Home Screen** installs the app icon.
+**Add → Save recipes from your phone's browser** covers both iPhone browsers. Both methods read the recipe from the page you're viewing, so they also work on sites that block server imports.
+- **Safari:** a one-time Shortcut (Run JavaScript on Web Page, then Open URLs). Then use **Share → Save to Recipe Box**.
+- **Chrome:** iOS doesn't let Shortcuts read pages in Chrome, so this uses a bookmark. Tap **Copy bookmark code**, save it as a bookmark's address, then on a recipe type "Save to" in the address bar and tap the bookmark. If Chrome blocks the new tab, the app opens in the same tab.
+- **Computers:** drag the 📌 button to the bookmarks bar (any browser).
+
+**Share → Add to Home Screen** (Safari or Chrome) installs the app icon. A share-menu shortcut that *downloads* the page instead would work in any browser, but most big recipe sites (AllRecipes, Serious Eats, Simply Recipes, Budget Bytes) block those downloads, so it isn't offered.
 
 ## Run locally
 

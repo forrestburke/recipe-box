@@ -297,8 +297,14 @@ function initAdd() {
     + `if(r){var keep=['name','image','recipeIngredient','ingredients','recipeInstructions','recipeYield','totalTime','prepTime','cookTime','recipeCategory','recipeCuisine','keywords'],o={'@type':'Recipe'};keep.forEach(function(q){if(r[q]!=null)o[q]=r[q]});p.r=o}`
     + `else p.t=document.body.innerText.slice(0,20000);`
     + `var url=${JSON.stringify(appUrl)}+'#import='+encodeURIComponent(JSON.stringify(p));`;
-  $('#bookmarklet').href = 'javascript:' + encodeURIComponent(`(function(){${extract}window.open(url,'_blank')})()`);
+  // New tab when allowed; if the browser blocks it (e.g. Chrome on iPhone), open the app in this tab instead
+  const bookmarkletUrl = 'javascript:' + encodeURIComponent(`(function(){${extract}var w=window.open(url,'_blank');if(!w)location.href=url})()`);
+  $('#bookmarklet').href = bookmarkletUrl;
   $('#bookmarklet').addEventListener('click', e => { e.preventDefault(); toast('Drag this button to your bookmarks bar'); });
+  $('#copy-bookmarklet').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(bookmarkletUrl); toast('Copied. Now paste it as the bookmark\'s address'); }
+    catch { prompt('Copy this bookmark code:', bookmarkletUrl); }
+  });
   const shortcutCode = `${extract}\ncompletion(url);`;
   $('#shortcut-code').textContent = shortcutCode;
   $('#copy-shortcut').addEventListener('click', async () => {

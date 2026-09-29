@@ -94,6 +94,7 @@ export function createBulk({ root, store, toast, onReview, onFinish }) {
       </div>
       <div class="bulk-progress" data-progress>${progressHtml(all)}</div>
       <p class="method-note">Check the titles, untick anything that isn't a recipe, then <strong>Save</strong>. Recipes marked <strong>⚠ check</strong> look incomplete. They're saved with a "needs review" flag so you can fix them later (Recipes → "Needs review"), or use <strong>Review</strong> to fix one now.${st.pages.length > 1 ? ' Pages that continue a recipe are joined automatically; use <strong>⤴ Join with previous</strong> or <strong>✂</strong> to fix.' : ''}</p>
+      ${st.pages.length ? `<p class="muted small">Keep this tab open until you've saved. Scanned pictures aren't kept after saving (only the text), and a page holding two recipes comes in as one, so split it with <strong>Review</strong>. Handwritten pages usually need fixing by hand.</p>` : ''}
       <div class="bulk-list">${all.length ? all.map((it, n) => itemHtml(it, n, all[n - 1])).join('') : '<p class="muted">Nothing to import.</p>'}</div>`;
   }
 

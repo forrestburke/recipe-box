@@ -134,6 +134,11 @@ button.chip.exclude[aria-pressed="true"]::before { content: '✕'; font-size: 10
 .dropzone { display: grid; place-items: center; min-height: 110px; border: 2px dashed var(--border); border-radius: 12px; cursor: pointer; text-align: center; padding: 12px; color: var(--muted); }
 .dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .bulk-card { margin-top: 14px; }
+.limits { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.limits summary { font-weight: 600; font-size: 14px; color: var(--text); }
+.limits ul { margin: 10px 0 0; padding-left: 1.2em; font-size: 13.5px; color: var(--muted); }
+.limits li { margin-bottom: 8px; }
+.limits li strong { color: var(--text); }
 .bulk-options { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .bulk-options p { margin: 0 0 10px; font-size: 14px; }
 .bulk-progress .bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 4px 0 6px; }

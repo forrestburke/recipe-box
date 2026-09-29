@@ -99,11 +99,24 @@
               <p class="muted small">Put ingredients and steps one per line inside their cell (Alt+Enter in Excel), or separate them with <code>|</code>. Leave meal type, protein or tags blank to fill them in automatically.</p>
             </div>
           </div>
+          <details class="limits">
+            <summary>Good to know before you scan</summary>
+            <ul>
+              <li><strong>One recipe per page works best.</strong> If a page has two recipes on it, they come in as one. Open it with <strong>Review</strong>, remove the second recipe, and add that one separately.</li>
+              <li><strong>Printed and typed pages read well; handwriting doesn't.</strong> Handwritten cards will usually come in with mistakes and be marked <strong>⚠ needs review</strong>, so plan to tidy those by hand.</li>
+              <li><strong>Big binders take a while.</strong> Each scanned page takes a few seconds to read, so 100 pages can take 5–10 minutes. Keep this tab open until it finishes; if you close it, pages that aren't saved yet are lost.</li>
+              <li><strong>Check anything marked ⚠ needs review.</strong> These recipes looked incomplete (fewer than 3 ingredients, no steps, or no title). They're still saved; find them later with the <strong>Needs review</strong> filter on the Recipes page.</li>
+              <li><strong>The scanned pictures aren't kept.</strong> Only the text read from each page is saved, to stay within the free storage. Keep your binder or PDF if you want the originals. You can still fix a recipe later with <strong>Edit → Scanned text → Re-read</strong>.</li>
+              <li><strong>Website links can't be imported in bulk.</strong> For recipes on websites, use the iPhone Share shortcut or the 📌 bookmark button, one recipe at a time.</li>
+            </ul>
+          </details>
         </div>
         <div id="import-status" class="status" hidden></div>
         <details class="card iphone-share" id="iphone-share">
-          <summary><strong>📱 iPhone: save recipes straight from Safari's Share menu</strong></summary>
-          <p class="muted">A one-time setup (about 2 minutes). Afterwards, on any recipe page in Safari, tap <strong>Share → Save to Recipe Box</strong>.</p>
+          <summary><strong>📱 Save recipes from your phone's browser</strong></summary>
+          <p class="muted">A one-time setup (about 2 minutes). Afterwards, when you're looking at a recipe on any website, one tap sends it to Recipe Box, ready to save. It works on sites that block imports too. The steps depend on which browser you use:</p>
+
+          <h3 class="sub">If you use Safari</h3>
           <ol class="steps">
             <li>Open the <strong>Shortcuts</strong> app, tap <strong>+</strong>, and name it <em>Save to Recipe Box</em>.</li>
             <li>Tap the <strong>ⓘ</strong> (or ⌄ next to the name) → turn on <strong>Show in Share Sheet</strong>. Under share sheet types, keep only <strong>Safari web pages</strong>.</li>
@@ -111,13 +124,24 @@
               <div class="code-wrap"><pre id="shortcut-code"></pre><button type="button" class="btn small" id="copy-shortcut">Copy code</button></div>
             </li>
             <li>Add a second action: search <strong>Open URLs</strong> and add it. It should say <em>Open JavaScript Result</em>.</li>
-            <li>Tap <strong>Done</strong>. The first time you use it on a site, iPhone asks permission to run it; tap <strong>Allow</strong>.</li>
+            <li>Tap <strong>Done</strong>. To use it, tap <strong>Share → Save to Recipe Box</strong> on a recipe page. The first time on each site, your iPhone asks permission; tap <strong>Allow</strong>.</li>
           </ol>
-          <p class="muted small">The recipe opens in Safari. Make sure you're signed in to Recipe Box in Safari too (the home-screen app keeps its own sign-in).</p>
+
+          <h3 class="sub">If you use Chrome</h3>
+          <p class="muted small">Chrome on iPhone doesn't let Shortcuts read web pages, so you use a bookmark instead.</p>
+          <ol class="steps">
+            <li><button type="button" class="btn small" id="copy-bookmarklet">Copy bookmark code</button></li>
+            <li>In Chrome, tap <strong>⋯ → Add to Bookmarks</strong> on any page (this one is fine), then open <strong>⋯ → Bookmarks</strong>, press and hold the new bookmark, and tap <strong>Edit Bookmark</strong>.</li>
+            <li>Change the name to <em>Save to Recipe Box</em>. Clear the web address box, paste the code you copied, and tap <strong>Done</strong>.</li>
+            <li>To use it, on a recipe page tap the <strong>address bar</strong>, type <em>Save to</em>, and tap the <strong>Save to Recipe Box</strong> bookmark in the list that appears.</li>
+          </ol>
+          <p class="muted small">On a computer (Chrome, Edge, Firefox or Safari), drag the <strong>📌 Save to Recipe Box</strong> button under "From a link" to your bookmarks bar instead.</p>
+
+          <p class="muted small">The recipe opens in the same browser you saved it from, so sign in to Recipe Box in that browser too. The home-screen app keeps its own sign-in.</p>
         </details>
         <details class="card iphone-share">
           <summary><strong>🏠 Put Recipe Box on your home screen</strong></summary>
-          <p class="muted">In Safari, open this page, tap <strong>Share → Add to Home Screen</strong>. It opens full-screen like an app. Sign in once inside it.</p>
+          <p class="muted">Open this page in your browser and tap <strong>Share → Add to Home Screen</strong>. In Chrome, the Share button is in the address bar or under <strong>⋯</strong>. It opens full-screen like an app. Sign in once inside it.</p>
         </details>
       </div>
       <div id="review" hidden></div>

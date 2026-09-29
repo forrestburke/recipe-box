@@ -30,6 +30,7 @@ http.createServer(async (req, res) => {
   try {
     const body = await fs.readFile(file);
     res.setHeader('Content-Type', TYPES[path.extname(file)] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-store'); // always serve the latest files while developing
     res.end(body);
   } catch {
     res.statusCode = 404;
