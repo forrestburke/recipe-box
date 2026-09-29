@@ -290,22 +290,31 @@ function initAdd() {
 
   // Bookmarklet and iPhone Shortcut: run on the recipe page in the user's own browser, so sites can't block them.
   // They read the page's recipe data and open the app with it in the address (#import=...).
+  // Google Docs draw their text in a way pages can't read, so on a Doc the code downloads the Doc's
+  // plain-text version instead (same site, so it works for private Docs you're signed in to).
   const appUrl = config.appUrl || (location.origin + location.pathname);
-  const extract = `var f=function(d){if(!d||typeof d!='object')return null;if(Array.isArray(d)){for(var i=0;i<d.length;i++){var x=f(d[i]);if(x)return x}return null}var t=[].concat(d['@type']||[]);for(var j=0;j<t.length;j++)if(String(t[j]).toLowerCase()=='recipe')return d;return f(d['@graph'])||f(d.mainEntity)};`
+  const extract = `var build=function(p){return ${JSON.stringify(appUrl)}+'#import='+encodeURIComponent(JSON.stringify(p))};`
+    + `var gd=location.hostname=='docs.google.com'&&location.pathname.match(/\\/document\\/(?:u\\/\\d+\\/)?d\\/([\\w-]+)/);`
+    + `var collect=function(done){`
+    + `if(gd){fetch('/document/d/'+gd[1]+'/export?format=txt').then(function(res){return res.text()}).then(function(t){done({u:location.href,n:document.title.replace(/ - Google Docs$/,''),t:t})}).catch(function(){done({u:location.href,n:document.title,t:''})});return}`
+    + `var f=function(d){if(!d||typeof d!='object')return null;if(Array.isArray(d)){for(var i=0;i<d.length;i++){var x=f(d[i]);if(x)return x}return null}var t=[].concat(d['@type']||[]);for(var j=0;j<t.length;j++)if(String(t[j]).toLowerCase()=='recipe')return d;return f(d['@graph'])||f(d.mainEntity)};`
     + `var r=null,s=document.querySelectorAll('script[type="application/ld+json"]');for(var k=0;k<s.length&&!r;k++){try{r=f(JSON.parse(s[k].textContent))}catch(e){}}`
     + `var p={u:location.href,n:document.title};`
     + `if(r){var keep=['name','image','recipeIngredient','ingredients','recipeInstructions','recipeYield','totalTime','prepTime','cookTime','recipeCategory','recipeCuisine','keywords'],o={'@type':'Recipe'};keep.forEach(function(q){if(r[q]!=null)o[q]=r[q]});p.r=o}`
     + `else p.t=document.body.innerText.slice(0,20000);`
-    + `var url=${JSON.stringify(appUrl)}+'#import='+encodeURIComponent(JSON.stringify(p));`;
-  // New tab when allowed; if the browser blocks it (e.g. Chrome on iPhone), open the app in this tab instead
-  const bookmarkletUrl = 'javascript:' + encodeURIComponent(`(function(){${extract}var w=window.open(url,'_blank');if(!w)location.href=url})()`);
+    + `done(p)};`;
+  // New tab when allowed; if the browser blocks it (e.g. Chrome on iPhone), open the app in this tab instead.
+  // For Docs the tab is opened first (while the click still counts) and filled in once the text arrives.
+  const bookmarkletUrl = 'javascript:' + encodeURIComponent(`(function(){${extract}`
+    + `var w=gd?window.open('about:blank','_blank'):null;`
+    + `collect(function(p){var url=build(p);if(gd){if(w)w.location.href=url;else location.href=url;return}var x=window.open(url,'_blank');if(!x)location.href=url})})()`);
   $('#bookmarklet').href = bookmarkletUrl;
   $('#bookmarklet').addEventListener('click', e => { e.preventDefault(); toast('Drag this button to your bookmarks bar'); });
   $('#copy-bookmarklet').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(bookmarkletUrl); toast('Copied. Now paste it as the bookmark\'s address'); }
     catch { prompt('Copy this bookmark code:', bookmarkletUrl); }
   });
-  const shortcutCode = `${extract}\ncompletion(url);`;
+  const shortcutCode = `${extract}\ncollect(function(p){completion(build(p))});`;
   $('#shortcut-code').textContent = shortcutCode;
   $('#copy-shortcut').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(shortcutCode); toast('Copied — paste it into the Shortcut'); }
@@ -320,6 +329,11 @@ function handleImportHash() {
   try { payload = JSON.parse(decodeURIComponent(location.hash.slice(8))); } catch { payload = null; }
   history.replaceState(null, '', '#add');
   if (!payload) { toast('Could not read that recipe'); return false; }
+  if (!payload.r && !String(payload.t || '').trim()) {
+    show('add');
+    setStatus('Nothing could be read from that page. If it\'s a Google Doc, make sure you\'re signed in to Google and can open it. Otherwise copy the recipe text and use Paste text.', true);
+    return true;
+  }
   let draft;
   if (payload.r) {
     const html = `<script type="application/ld+json">${JSON.stringify(payload.r).replace(/</g, '\\u003c')}</script>`;

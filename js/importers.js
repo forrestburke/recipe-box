@@ -57,7 +57,33 @@ async function ocr(image, onProgress) {
   return cleanOcrText(data.text);
 }
 
+// docs.google.com/document/d/<id>/... -> <id>
+export function googleDocId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== 'docs.google.com') return null;
+    return u.pathname.match(/^\/document\/(?:u\/\d+\/)?d\/([\w-]{20,})/)?.[1] || null;
+  } catch { return null; }
+}
+
+// Google offers every shared Doc as plain text and allows browsers to read it directly, so no server is needed
+async function importGoogleDoc(id, url) {
+  let res;
+  try { res = await fetch(`https://docs.google.com/document/d/${id}/export?format=txt`); }
+  catch { throw new Error(GDOC_PRIVATE); }
+  const text = res.ok ? await res.text() : '';
+  if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) throw new Error(GDOC_PRIVATE);
+  const draft = parseRecipeText(text);
+  draft.rawText = text;
+  draft.sourceUrl = url;
+  draft.source = { type: 'url', url };
+  return draft;
+}
+const GDOC_PRIVATE = 'Couldn\'t open that Google Doc. It\'s probably private. Either change its sharing to "Anyone with the link can view" (Share button in the Doc), or open the Doc and use the Save to Recipe Box shortcut or bookmark while signed in to Google.';
+
 export async function importFromUrl(url) {
+  const docId = googleDocId(url);
+  if (docId) return importGoogleDoc(docId, url);
   let res;
   try {
     res = await fetch(`${config.fetchProxy}?url=${encodeURIComponent(url)}`);

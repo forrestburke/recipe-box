@@ -12,6 +12,7 @@ No AI services, no build step, no framework — plain HTML/CSS/JavaScript that r
 | **Bookmark button** | For sites that block server requests (AllRecipes, Serious Eats…), a bookmarklet reads the same structured data from the page in *your* browser and sends it to the app. | Exact |
 | **Photo / scan (JPEG, PNG)** | [Tesseract.js](https://tesseract.projectnaptha.com/) OCR, running entirely in your browser, then heuristics that find the "Ingredients" / "Method" sections, quantities and units. | Good on clean prints; always reviewed before saving |
 | **PDF** | [pdf.js](https://mozilla.github.io/pdf.js/) extracts the text layer; scanned PDFs with no text are OCR'd page by page. | Good |
+| **Google Docs** | Google provides every Doc as plain text that browsers are allowed to read, so a Doc link imports directly (Doc must be shared "Anyone with the link"). The bookmark/Shortcut also works on private Docs you're signed in to. | Good |
 | **Pasted text** | Same text heuristics. | Good |
 
 Every import lands on a **review screen** where you can fix the title, ingredients, steps and categories before saving.

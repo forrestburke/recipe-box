@@ -134,3 +134,18 @@ test('bulk: page joining, blank pages, weak recipes, pasted batches', () => {
   assert.equal(splitPastedRecipes('Soup\n1 cup water\n---\nBread\n2 cups flour\n===\nTea\n1 tea bag and water').length, 3);
   assert.equal(splitPastedRecipes('Just one recipe\n1 cup rice').length, 1);
 });
+
+import { readFileSync } from 'node:fs';
+import { googleDocId } from '../js/importers.js';
+
+test('Google Doc recipe: no Directions heading, paragraphs as steps', () => {
+  const text = readFileSync(new URL('./fixtures/google-doc-recipe.txt', import.meta.url), 'utf8');
+  const d = parseRecipeText(text);
+  assert.equal(d.title, 'Cinnamon Swirl Loaf');
+  assert.equal(d.ingredients.length, 10);
+  assert.ok(d.ingredients.at(-1).startsWith('Cinnamon sugar'));
+  assert.equal(d.steps.length, 10);
+  assert.ok(d.steps[3].startsWith('While mixing on low'));
+  assert.equal(googleDocId('https://docs.google.com/document/d/1AxWfzg4M69PWOAhC1ZVc1I56AUE09-m6pkknL5BmmA0/edit?tab=t.0'), '1AxWfzg4M69PWOAhC1ZVc1I56AUE09-m6pkknL5BmmA0');
+  assert.equal(googleDocId('https://docs.google.com/spreadsheets/d/abcdefghijklmnopqrstuvwxyz/edit'), null);
+});

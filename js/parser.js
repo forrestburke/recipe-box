@@ -374,10 +374,14 @@ function looksLikeIngredient(line) {
   return STARTS_WITH_QTY.test(line) || UNIT_NEAR_START.test(line) || /^(salt|pepper|kosher salt|black pepper|olive oil)\b/i.test(line);
 }
 
+// Empty strings in `lines` mark blank lines in the source: a new paragraph is always a new step
 function mergeWrappedSteps(lines) {
   const out = [];
+  let paragraphBreak = true;
   for (let line of lines) {
-    const isNew = STEP_NUMBER.test(line) || BULLET.test(line);
+    if (!line) { paragraphBreak = true; continue; }
+    const isNew = paragraphBreak || STEP_NUMBER.test(line) || BULLET.test(line);
+    paragraphBreak = false;
     line = line.replace(STEP_NUMBER, '').replace(BULLET, '').trim();
     if (!line) continue;
     const prev = out[out.length - 1];
@@ -386,6 +390,9 @@ function mergeWrappedSteps(lines) {
   }
   return out;
 }
+
+// A full sentence of instructions rather than an ingredient line
+const isSentence = (l) => l.length > 70 || (/[.!?]$/.test(l) && l.split(/\s+/).length > 6);
 
 function mergeWrappedIngredients(lines) {
   const out = [];
@@ -405,7 +412,8 @@ export function parseRecipeText(text) {
     .replace(/\r/g, '')
     .split('\n')
     .map(l => l.replace(/\s+/g, ' ').trim())
-    .filter(l => l && !/^[\W_]+$/.test(l));
+    .map(l => (/^[\W_]*$/.test(l) ? '' : l))          // blank or punctuation-only -> paragraph break
+    .filter((l, i, all) => l || (i > 0 && all[i - 1])); // keep one '' per run of blank lines
 
   let servings = null, totalTime = null;
   const whole = lines.join('\n');
@@ -418,7 +426,7 @@ export function parseRecipeText(text) {
   const stepIdx = lines.findIndex(l => STEP_HEAD.test(l));
   const isMeta = l => /^(serves|servings|yields?|makes)\b\s*:?\s*\d|^(prep|cook|total|active|cooking|baking)(\s+time)?\s*:|^(prep|cook|total|active)\s+time\b/i.test(l);
 
-  const titleCandidates = lines.slice(0, Math.max(1, Math.min(ingIdx === -1 ? 5 : ingIdx, 5)));
+  const titleCandidates = lines.slice(0, Math.max(1, ingIdx === -1 ? 8 : ingIdx)).filter(Boolean).slice(0, 5);
   const title = titleCandidates.find(l => l.length >= 3 && l.length <= 80 && /[a-z]/i.test(l) && !INGR_HEAD.test(l) && !STEP_HEAD.test(l) && !isMeta(l) && !looksLikeIngredient(l)) || 'Untitled recipe';
 
   let ingredients = [], steps = [], notes = [];
@@ -434,21 +442,24 @@ export function parseRecipeText(text) {
       if (section === 'ing') ingredients.push(l);
       else if (section === 'step') steps.push(l);
       else if (section === 'note') notes.push(l);
-      else if (looksLikeIngredient(l)) ingredients.push(l); // content before any header
+      else if (l && looksLikeIngredient(l)) ingredients.push(l); // content before any header
     }
     // header for one section but not the other: split by shape
     if (ingIdx === -1 && ingredients.length === 0) {
-      ingredients = steps.filter(looksLikeIngredient);
-      steps = steps.filter(l => !looksLikeIngredient(l));
+      ingredients = steps.filter(l => l && looksLikeIngredient(l));
+      steps = steps.filter(l => !l || !looksLikeIngredient(l));
     }
     if (stepIdx === -1) {
+      // "Ingredients" heading but no "Directions" heading: the list ends at the first full sentence
       const after = ingredients;
-      ingredients = after.filter((l, i) => looksLikeIngredient(l) || (i > 0 && l.length < 45 && !/[.!?]$/.test(l)));
-      steps = steps.concat(after.filter(l => !ingredients.includes(l)));
+      const firstSentence = after.findIndex(l => l && !looksLikeIngredient(l) && isSentence(l));
+      const cut = firstSentence === -1 ? after.length : firstSentence;
+      ingredients = after.slice(0, cut).filter(Boolean);
+      steps = after.slice(cut).concat(steps);
     }
   } else {
     for (const l of lines) {
-      if (l === title || isMeta(l)) continue;
+      if (!l || l === title || isMeta(l)) continue;
       if (looksLikeIngredient(l)) ingredients.push(l);
       else if (l.length > 25) steps.push(l);
     }
