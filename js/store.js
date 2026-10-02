@@ -113,8 +113,12 @@ export const store = {
   isMine,
   kitchenName,
   saveRecipe(r) {
-    assertMine(data.recipes.find(x => x.id === r.id));
-    r = { ...r, id: r.id || uid(), updatedAt: Date.now(), createdAt: r.createdAt || Date.now() };
+    const prev = data.recipes.find(x => x.id === r.id);
+    assertMine(prev);
+    r = { ...r, id: r.id || uid(), updatedAt: Date.now(), createdAt: prev?.createdAt || r.createdAt || Date.now() };
+    // who added it (kept through edits) so it can show as "new" for everyone else
+    if (prev?.addedBy) Object.assign(r, { addedBy: prev.addedBy, addedByName: prev.addedByName });
+    else if (!prev && myEmail()) Object.assign(r, { addedBy: myEmail(), addedByName: myFirstName() });
     const home = homeKitchen();
     if (home) { r.kitchen = home; r.kitchenName = cloud?.kitchenName || r.kitchenName || kitchenName(home); }
     const i = data.recipes.findIndex(x => x.id === r.id);
@@ -130,7 +134,7 @@ export const store = {
   copyRecipe(id) {
     const src = data.recipes.find(r => r.id === id);
     if (!src) return null;
-    const { id: _, kitchen, kitchenName: __, createdAt, updatedAt, ...rest } = src;
+    const { id: _, kitchen, kitchenName: __, createdAt, updatedAt, addedBy, addedByName, ...rest } = src;
     return store.saveRecipe({ ...rest, copiedFrom: { id: src.id, kitchen: src.kitchen || null } });
   },
 
@@ -166,6 +170,12 @@ export const store = {
       .sort((a, b) => (b.mine - a.mine) || a.name.localeCompare(b.name));
   },
   currentKitchen() { return homeKitchen() || 'local'; },
+
+  // "New" recipes: added by someone else in the last 30 days and not opened by you yet
+  isNew,
+  newRecipes() { return data.recipes.filter(isNew); },
+  markSeen(id) { if (isNew(data.recipes.find(r => r.id === id))) { seen.add(id); saveSeen(); notify({ seen: true }); } },
+  markAllSeen() { data.recipes.filter(isNew).forEach(r => seen.add(r.id)); saveSeen(); notify({ seen: true, all: true }); },
 
   cloudStatus() {
     if (!config.firebase) return null;
@@ -333,6 +343,8 @@ async function connectKitchen(hh, allKitchens, my) {
   live();
   await syncState(c);
   live();
+  await syncSeen(c);
+  live();
   cloud = c;
   localStorage.setItem(kitchenKey(), hh.id);
   saveLocal();
@@ -377,6 +389,48 @@ async function copyRecipes(sourceQuery, fid, hid, name) {
 const recipesCol = (c) => fbMods.fs.collection(fbDb, 'families', c.fid, 'recipes');
 const recipeDoc = (c, id) => fbMods.fs.doc(fbDb, 'families', c.fid, 'recipes', id);
 const stateDoc = (c) => fbMods.fs.doc(fbDb, 'households', c.hid, 'meta', 'state');
+const seenDoc = (c) => fbMods.fs.doc(fbDb, 'households', c.hid, 'seen', c.uid);
+
+// ---------- "New" recipes ----------
+// Each person's opened-recipe list is kept in this browser and in households/{hid}/seen/{uid},
+// so a recipe opened on the computer isn't "new" again on the phone.
+const NEW_DAYS = 30;
+let seen = new Set();
+let seenTimer = null;
+const seenKey = () => 'recipe-planner.seen.' + (fbUser?.uid || '');
+const myEmail = () => cloud?.email || (fbUser ? normEmail(fbUser.email) : '');
+const myFirstName = () => String(fbUser?.displayName || fbUser?.email || '').split(/[\s@]/)[0];
+
+function isNew(r) {
+  if (!r?.addedBy || !fbUser || r.addedBy === myEmail()) return false;
+  if ((r.createdAt || 0) < Date.now() - NEW_DAYS * 864e5) return false;
+  return !seen.has(r.id);
+}
+
+function saveSeen() {
+  if (cloud) {
+    // forget recipes that are too old to be "new" anyway, so the list stays small
+    const cutoff = Date.now() - (NEW_DAYS + 15) * 864e5;
+    seen = new Set([...seen].filter(id => (data.recipes.find(r => r.id === id)?.createdAt || 0) >= cutoff));
+  }
+  const ids = [...seen];
+  try { localStorage.setItem(seenKey(), JSON.stringify(ids)); } catch {}
+  clearTimeout(seenTimer);
+  const c = cloud;
+  seenTimer = setTimeout(() => { if (c && cloud === c) fbMods.fs.setDoc(seenDoc(c), { ids, updatedAt: Date.now() }).catch(() => {}); }, 1500);
+}
+
+async function syncSeen(c) {
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem(seenKey()) || 'null'); } catch {}
+  let remote = null;
+  try { const snap = await fbMods.fs.getDoc(seenDoc(c)); if (snap.exists()) remote = snap.data().ids || []; } catch {}
+  seen = new Set([...(local || []), ...(remote || [])]);
+  // First time for this person: what's already in the library isn't "new" to them
+  if (!local && !remote) data.recipes.forEach(r => seen.add(r.id));
+  try { localStorage.setItem(seenKey(), JSON.stringify([...seen])); } catch {}
+  if (!remote || (local && local.some(id => !remote.includes(id)))) fbMods.fs.setDoc(seenDoc(c), { ids: [...seen], updatedAt: Date.now() }).catch(() => {});
+}
 
 // Merge with the family library: the cloud copy wins, except for changes made on this device that
 // haven't been confirmed yet (data.pending), which are kept and uploaded by flush()
@@ -434,6 +488,7 @@ function listenForChanges(c) {
   unsubscribers.push(fs.onSnapshot(recipesCol(c), snap => {
     if (!current()) return;
     let changed = false;
+    const arrived = []; // recipes someone else just added
     for (const ch of snap.docChanges()) {
       if (ch.doc.metadata.hasPendingWrites) continue; // our own write
       const id = ch.doc.id;
@@ -441,10 +496,13 @@ function listenForChanges(c) {
       const r = { ...ch.doc.data(), id };
       const i = data.recipes.findIndex(x => x.id === id);
       if (ch.type === 'removed') { if (i !== -1) { data.recipes.splice(i, 1); changed = true; } }
-      else if (i === -1) { data.recipes.push(r); changed = true; }
+      else if (i === -1) { data.recipes.push(r); changed = true; if (isNew(r)) arrived.push(r); }
       else if (JSON.stringify(data.recipes[i]) !== JSON.stringify(r)) { data.recipes[i] = r; changed = true; }
     }
-    if (changed) { saveLocal(); notify({ all: true, remote: true }); }
+    if (changed) {
+      saveLocal();
+      notify({ all: true, remote: true, ...(arrived.length ? { newRecipes: arrived } : {}) });
+    }
   }, onError));
 
   unsubscribers.push(fs.onSnapshot(stateDoc(c), snap => {
@@ -582,6 +640,7 @@ async function cloudSignOut() {
   await fbMods.auth.signOut(fbAuth);
   // Nothing of this person's is left behind for the next person using this browser
   data = defaults();
+  seen = new Set();
   saveLocal();
   notify({ all: true, cloud: true });
 }

@@ -48,6 +48,10 @@ Every import lands on a **review screen** where you can fix the title, ingredien
 - If you belong to more than one kitchen, a switcher appears in the header.
 - Security is enforced in `firestore.rules`. Test it locally with the emulator: `firebase emulators:start --only auth,firestore`, then open http://localhost:5173/?emulator (needs Java 11+).
 
+## New recipes
+
+Recipes someone else in the family added in the last 30 days show as **NEW** until you open them. You get a gold ribbon (listed first), a count on the Recipes tab, a banner with **Show them** / **Mark all as seen**, a **✨ New to me** filter, and a pop-up message when one arrives while the app is open. Opened recipes are remembered per person in households/{hid}/seen/{uid}, so it syncs across your devices. The first time someone uses the app, everything already there counts as seen.
+
 ## Meals & servings
 
 Plan any mix of **breakfast, lunch and dinner**. Set **Cooking for N people**, adjust servings per meal, and the shopping list scales. Recipe pages have a servings adjuster too, which needs a "Serves" number on the recipe.

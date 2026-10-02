@@ -81,6 +81,26 @@ function kitchenBadge(r) {
   return store.isMine(r) ? '' : `<span class="chip kitchen" title="Added by ${esc(store.kitchenName(r.kitchen))}">🏠 ${esc(store.kitchenName(r.kitchen))}</span>`;
 }
 
+// "✨ 3 new recipes from Linda" at the top of the library, and a count on the Recipes tab
+function renderNewBanner() {
+  const fresh = store.newRecipes();
+  const el = $('#lib-new-banner');
+  if (!fresh.length) { el.hidden = true; el.innerHTML = ''; return; }
+  const names = [...new Set(fresh.map(r => r.addedByName || store.kitchenName(r.kitchen)))];
+  const who = names.length > 2 ? `${names.slice(0, 2).join(', ')} and others` : names.join(' and ');
+  const filtering = $('#lib-meal').value === '__new';
+  el.hidden = false;
+  el.innerHTML = `<span>✨ <strong>${fresh.length} new recipe${fresh.length === 1 ? '' : 's'}</strong> from ${esc(who)}</span>
+    <span class="row wrap">${filtering ? '<button class="btn small" data-new="all">Show all recipes</button>' : '<button class="btn small primary" data-new="show">Show them</button>'}
+    <button class="btn small ghost" data-new="seen">Mark all as seen</button></span>`;
+}
+
+function updateNewCount() {
+  const n = store.newRecipes().length;
+  const tab = $('.tabs [data-view="library"]');
+  tab.innerHTML = 'Recipes' + (n ? ` <span class="tab-badge" aria-label="${n} new">${n}</span>` : '');
+}
+
 function chipsHtml(r, { tags = true } = {}) {
   return (r.mealTypes || []).map(m => `<span class="chip meal">${esc(m)}</span>`).join('')
     + (r.proteins || []).map(p => `<span class="chip protein">${PROTEIN_EMOJI[p] || ''} ${esc(p)}</span>`).join('')
@@ -115,9 +135,15 @@ document.addEventListener('click', e => {
 
 // ---------------- Library ----------------
 function initLibrary() {
-  $('#lib-meal').innerHTML = '<option value="">All meals</option>' + MEAL_TYPES.map(m => `<option value="${m}">${cap(m)}</option>`).join('') + '<option value="__review">⚠ Needs review</option>';
+  $('#lib-meal').innerHTML = '<option value="">All meals</option>' + MEAL_TYPES.map(m => `<option value="${m}">${cap(m)}</option>`).join('') + '<option value="__new">✨ New to me</option><option value="__review">⚠ Needs review</option>';
   $('#lib-protein').innerHTML = '<option value="">Any protein</option>' + PROTEIN_LIST.map(p => `<option value="${p}">${cap(p)}</option>`).join('') + '<option value="__none">No main protein</option>';
   ['#lib-search', '#lib-meal', '#lib-protein', '#lib-kitchen'].forEach(s => $(s).addEventListener('input', renderLibrary));
+  $('#lib-new-banner').addEventListener('click', e => {
+    const act = e.target.closest('[data-new]')?.dataset.new;
+    if (act === 'show') { $('#lib-meal').value = '__new'; renderLibrary(); }
+    if (act === 'all') { $('#lib-meal').value = ''; renderLibrary(); }
+    if (act === 'seen') { store.markAllSeen(); $('#lib-meal').value = $('#lib-meal').value === '__new' ? '' : $('#lib-meal').value; renderLibrary(); toast('All caught up'); }
+  });
   $('#lib-grid').addEventListener('click', e => {
     const card = e.target.closest('[data-recipe]');
     if (card) openRecipe(card.dataset.recipe);
@@ -141,13 +167,15 @@ function renderLibrary() {
   const list = all.filter(r => {
     if (kVal && (r.kitchen || store.currentKitchen()) !== kVal) return false;
     if (meal === '__review') { if (!r.needsReview || !store.isMine(r)) return false; }
+    else if (meal === '__new') { if (!store.isNew(r)) return false; }
     else if (meal && !r.mealTypes?.includes(meal)) return false;
     if (protein === '__none' && r.proteins?.length) return false;
     if (protein && protein !== '__none' && !r.proteins?.includes(protein)) return false;
     if (q && !(r.title.toLowerCase().includes(q) || r.ingredients?.some(i => i.raw.toLowerCase().includes(q)))) return false;
     return true;
-  }).sort((a, b) => a.title.localeCompare(b.title));
+  }).sort((a, b) => (store.isNew(b) - store.isNew(a)) || a.title.localeCompare(b.title));
 
+  renderNewBanner();
   $('#lib-count').textContent = all.length ? `${list.length}${list.length !== all.length ? ' of ' + all.length : ''}` : '';
   if (!all.length) {
     $('#lib-grid').innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">📖</div>
@@ -157,7 +185,8 @@ function renderLibrary() {
   }
   if (!list.length) { $('#lib-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">No recipes match.</div>'; return; }
   $('#lib-grid').innerHTML = list.map(r => `
-    <button class="card recipe-card" data-recipe="${esc(r.id)}">
+    <button class="card recipe-card ${store.isNew(r) ? 'is-new' : ''}" data-recipe="${esc(r.id)}">
+      ${store.isNew(r) ? `<span class="new-ribbon" title="Added by ${esc(r.addedByName || store.kitchenName(r.kitchen))}">NEW</span>` : ''}
       ${thumbHtml(r)}
       <div class="body">
         <h3>${esc(r.title)}</h3>
@@ -184,6 +213,7 @@ function loadSamples() {
 // ---------------- Recipe dialog ----------------
 function openRecipe(id, servings) {
   const r = store.getRecipe(id);
+  if (r) store.markSeen(id);
   if (!r) return;
   const mine = store.isMine(r);
   const serves = servings || r.servings || null;
@@ -874,7 +904,7 @@ function renderPlan() {
       ${meals.length > 1 ? `<div class="slot-label">${SLOT_LABEL[meal]}</div>` : ''}
       <div class="slot-main">
         ${s.skip ? `<span class="muted">No cooking — eating out / leftovers</span>`
-          : r ? `<div class="day-meal"><button class="day-thumb-btn" data-open="${esc(r.id)}" data-serves="${serves}" aria-label="Open ${esc(r.title)}">${thumbHtml(r, 'day-thumb')}</button><div><button class="title" data-open="${r.id}" data-serves="${serves}">${esc(r.title)}</button><div class="chips" style="margin-top:4px">${kitchenBadge(r)}${chipsHtml(r, { tags: false })}</div></div></div>`
+          : r ? `<div class="day-meal"><button class="day-thumb-btn" data-open="${esc(r.id)}" data-serves="${serves}" aria-label="Open ${esc(r.title)}">${thumbHtml(r, 'day-thumb')}</button><div><button class="title" data-open="${esc(r.id)}" data-serves="${serves}">${esc(r.title)}</button><div class="chips" style="margin-top:4px">${store.isNew(r) ? '<span class="chip new-chip">✨ new</span>' : ''}${kitchenBadge(r)}${chipsHtml(r, { tags: false })}</div></div></div>`
           : '<span class="muted">Nothing planned</span>'}
         ${s.skip ? '' : `<select data-choose aria-label="Choose ${meal} recipe"><option value="">${r ? 'Pick a different recipe…' : 'Choose a recipe…'}</option>${options.map(o => `<option value="${esc(o.id)}">${esc(o.title)}${fits.includes(o) ? '' : ' (outside filters)'}</option>`).join('')}</select>`}
       </div>
@@ -1245,11 +1275,19 @@ function initSettings() {
 store.init();
 store.onChange(ch => {
   renderAccount();
+  updateNewCount();
+  if (ch.seen && view === 'library') renderLibrary();
+  if (ch.newRecipes?.length) {
+    const n = ch.newRecipes.length;
+    const who = [...new Set(ch.newRecipes.map(r => r.addedByName || store.kitchenName(r.kitchen)))].join(' and ');
+    toast(n === 1 ? `✨ ${who} added "${ch.newRecipes[0].title}"` : `✨ ${who} added ${n} new recipes`);
+  }
   if (ch.cloud || ch.all) render();
   if (ch.cloud && !ch.all && view === 'settings' && !typingIn('#view-settings')) renderSettings();
 });
 setTimeout(() => fillMissingImages(), 1500); // quietly find photos for recipes saved before this feature
 initLibrary(); initAdd(); initPlan(); initShop(); initSettings();
+updateNewCount();
 renderAccount();
 if (!handleImportHash()) {
   const start = location.hash.slice(1);

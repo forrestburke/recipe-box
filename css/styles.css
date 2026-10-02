@@ -109,6 +109,12 @@ button.chip.exclude[aria-pressed="true"]::before { content: '✕'; font-size: 10
 .thumb, .day-thumb { position: relative; overflow: hidden; background: var(--surface-2); display: grid; place-items: center; }
 .thumb img, .day-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .recipe-card .thumb { height: 150px; font-size: 40px; }
+.recipe-card { position: relative; }
+.recipe-card.is-new { border-color: #e0a526; box-shadow: 0 0 0 2px color-mix(in srgb, #e0a526 35%, transparent), var(--shadow); }
+.new-ribbon { position: absolute; top: 10px; left: 10px; z-index: 1; background: #e0a526; color: #2a1d00; font: 700 11px var(--font); letter-spacing: .08em; padding: 3px 9px; border-radius: 999px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+.new-banner { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, #e0a526 18%, var(--surface)); border: 1px solid color-mix(in srgb, #e0a526 45%, transparent); }
+.tab-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: #e0a526; color: #2a1d00; font-size: 11px; font-weight: 700; }
+.chip.new-chip { background: color-mix(in srgb, #e0a526 25%, var(--surface)); color: #8a5a00; }
 .day-meal { display: flex; gap: 12px; align-items: center; }
 .day-thumb-btn { border: 0; padding: 0; background: none; cursor: pointer; flex: none; }
 .day-thumb { width: 64px; height: 64px; border-radius: 10px; font-size: 26px; }
